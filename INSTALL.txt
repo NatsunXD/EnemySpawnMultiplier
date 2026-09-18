@@ -1,0 +1,45 @@
+Enemy Spawn Multiplier 6x - v9
+
+Close the game before upgrading. Replace previous Enemy Spawn Multiplier
+2x or 5x-v2/v3/v4/v5/v6/v7 or 6x-v8 entries with
+Enemy-Spawn-Multiplier-6x-v9.zip.
+Keep Bingus-Shared-Loader-v12.zip enabled, then deploy both using HDArsenal
+or HD2MM. Use one manager. Restart the game to discard previous memory edits.
+The existing mod resource identity and GUID are unchanged.
+
+This build scales the Encounter base composition budget by 6 and nonzero
+per-type caps by 5. It resolves the active config through the director hash table
+or native resource-key fallback. A read-only resource table is cloned to
+private writable memory and retargeted before editing. It then shortens Patrol/Straggler intervals to
+one fifth (minimum 0.2s), and multiplies their group clamp by 5.
+Example: Straggler 20-40s -> 4-8s, Patrol 8-14s -> 1.6-2.8s,
+group clamp 10 -> 50. The group clamp is an upper limit, not a fixed count.
+
+The current process receives four verified instruction edits that remove the
+70, 448, desired-reached and combined-100 population exits. Original bytes
+must match exactly; a partial failure rolls earlier edits back. Native
+timestamps, desired values, ProducedFighter counters, pending queue quantities
+and director+0x36C0 remain read-only.
+Actual spawn totals still depend on demand, population limits, templates
+and spawn-location queries; offline tests do not establish a 5x live count.
+
+This release is data-v9, for Steam build 24826606 / EXE 1.8.45317.0.
+Loader-v2 / API 1 or later with this mod resource registered is required.
+
+After a mission starts, check %LOCALAPPDATA%/EnemySpawnMultiplier.log:
+data-v9 + spawn_multiplier_ready means the limits were removed and the active
+config was scaled.
+spawn_multiplier_partial means only budget/caps applied; cfg= gives the
+config failure reason and checks continue. i=, g= and d= should be nonzero
+for a valid active config. cfg=director:... or cfg=resource:... shows its
+source/address. d= remains the game's original value; l=off confirms the four
+early exits are disabled. t=0 is expected; x= is the native ProducedFighter count.
+
+For a comparison, use the same mission type/difficulty and host role.
+Check Patrol and Encounter behavior separately. Record the three log lines,
+elapsed time, approximate units per event and any prolonged spawn pauses.
+
+To uninstall: close the game, disable this mod, purge deployment, and
+redeploy the remaining mods.
+
+Developed with assistance from GPT-6 Astra.
