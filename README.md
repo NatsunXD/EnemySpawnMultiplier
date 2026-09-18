@@ -1,8 +1,8 @@
-# Enemy Spawn Multiplier 6x
+# Enemy Spawn Multiplier
 
 ## 中文说明
 
-这是 data-v9，适用于 Steam build `24826606` / EXE `1.8.45317.0`。
+v9版本，适用于 Steam build `24826606` / EXE `1.8.45317.0`。
 
 本 MOD 更改了刷怪配置。把预算和部分刷怪上限放大，让一轮拉烟能持续更久，巡逻队也能更快重新刷新。
 
