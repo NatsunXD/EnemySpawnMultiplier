@@ -5,16 +5,18 @@ import subprocess
 from archive import LUA, EXE_SHA, GAME_DLL_SHA, resource_hash
 
 
-def build_module(root, build, module_name, patch_name, revision):
+def build_module(root, build, module_name, patch_name, revision, template_bias=False):
     build.mkdir(parents=True, exist_ok=True)
     module = ''
     for variable, filename in [('create_api', 'windows_api.lua'), ('patch', patch_name),
                                ('install_loader', 'archive_loader.lua')]:
         code = (root / 'src' / filename).read_text(encoding='utf-8')
-        for forbidden in ('CreateRemoteThread', 'LoadLibrary'):
+        for forbidden in ('VirtualProtect', 'FlushInstructionCache', 'CreateRemoteThread', 'LoadLibrary'):
             if forbidden in code:
                 raise ValueError(f'Unsupported native modification API in {filename}: {forbidden}')
         module += f'local {variable} = (function()\n{code}\nend)()\n'
+        if variable == 'patch' and template_bias:
+            module += 'patch.template_bias_enabled = true\n'
     module += f"install_loader(create_api, patch, {{revision = '{revision}', "
     module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '})\n'
     path, output = build / 'mod.wrapper.lua', build / 'mod.ljbc'

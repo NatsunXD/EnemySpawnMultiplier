@@ -1,4 +1,4 @@
-# Enemy Spawn Multiplier data-v9
+# Enemy Spawn Multiplier v13 variants
 
 Targets Steam build 24826606 / EXE 1.8.45317.0. Addresses below are game.dll RVAs or explicitly named object offsets. Static findings are recorded in `research/SPAWN_FINDINGS_2026-09-18.md` at the workspace root. Gameplay verification is pending.
 
@@ -68,7 +68,24 @@ The package is one named Lua resource: `mods/cowboybingus/enemy_spawn_multiplier
 
 The lifecycle checks supported module hashes, preserves the previous update callback and checks mission data every 100 ms. Fatal write/layout failures stop this module's checks. Missing or unsupported config resolution is recoverable: budget/caps can be active with status `spawn_multiplier_partial`; later checks can become `spawn_multiplier_ready` when the active config succeeds. Before any usable data, the status is `waiting_for_mission` or `waiting_for_spawn_config`.
 
-`%LOCALAPPDATA%/EnemySpawnMultiplier.log` contains revision, status and diagnostic detail. `p=` is budget/current baseline, `c=` valid/total cap rows, `i=` Straggler then Patrol intervals, `g=` group clamp, `d=` the unchanged active desired target, `l=off` confirms the four code branches are disabled, and `cfg=` is the source/index/address or failure reason. `t=0` records that pending timestamps are not edited. `x=` reports native ProducedFighter count. A ready status verifies writes, not gameplay totals.
+`%LOCALAPPDATA%/EnemySpawnMultiplier.log` contains revision, status and diagnostic detail. `p=` is budget/current baseline, `c=` valid/total cap rows, `i=` Straggler then Patrol intervals, `g=` group clamp, `d=` the scaled desired target, `l=vanilla` confirms native population branches are unchanged, and `cfg=` is the source/index/address or failure reason. The active config's `+0x78` override is written in the private clone so the native budget function takes the enlarged value directly. `t=0` records that pending timestamps are not edited. `x=` reports native ProducedFighter count. A ready status verifies writes, not gameplay totals.
+
+## Optional template bias
+
+The v13 Native Composition build leaves candidate weights unchanged. The v13
+Light-Medium Bias build enables the same source module's
+`template_bias_enabled` switch. The active candidate array starts at
+`director+0x432F8`, uses stride `0xD8`, and has its count at `+0x5188C`.
+Native selection multiplies candidate `+0xC0` into its computed random weight;
+`+0xD4` is the budget cost and `+0xA8` points to the template rows.
+
+The biased build divides cost by the template's planned unit quantity and ranks candidates
+within the current faction/difficulty pool. The lower 50% receives a `3.6`
+weight factor, the next 30% receives `1.25`, and the highest 20% receives
+`0.25`. This avoids faction-specific type IDs and naturally favors larger
+groups for the same budget. It is a selection preference, not a guarantee that
+every selected unit has a particular armor class. `w=biased/total` in the log
+reports the candidate-weight pass.
 
 ## Validation
 

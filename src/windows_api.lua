@@ -1,6 +1,5 @@
 return function()
     local ffi = require('ffi')
-    local bit = require('bit')
     assert(ffi.abi('64bit'), 'Windows x64 is required')
     ffi.cdef [[
         void *GetModuleHandleA(const char *name);
@@ -8,8 +7,6 @@ return function()
         void *GetCurrentProcess(void);
         int ReadProcessMemory(void *process, const void *address, void *buffer, size_t size, size_t *read);
         int WriteProcessMemory(void *process, void *address, const void *buffer, size_t size, size_t *written);
-        int VirtualProtect(void *address, size_t size, uint32_t protection, uint32_t *old_protection);
-        int FlushInstructionCache(void *process, const void *address, size_t size);
         typedef struct {
             void *base; void *allocation_base; uint32_t allocation_protection;
             uint16_t partition; uint16_t reserved; size_t size;
@@ -56,54 +53,6 @@ return function()
         if not api.writable_data(address, #bytes) then return false end
         local count = ffi.new('size_t[1]')
         return kernel.WriteProcessMemory(process, address, bytes, #bytes, count) ~= 0 and count[0] == #bytes
-    end
-
-    function api.patch_code(address, expected, replacement)
-        if type(expected) ~= 'string' or type(replacement) ~= 'string'
-            or #expected == 0 or #expected ~= #replacement then
-            return false, 'invalid_patch'
-        end
-        local current = api.read(address, #expected)
-        if current == replacement then return true, 'already_patched' end
-        if current ~= expected then return false, 'original_bytes_mismatch' end
-
-        local region = ffi.new('HsuMemoryRegion[1]')
-        if query_region(address, region, ffi.sizeof(region[0])) ~= ffi.sizeof(region[0]) then
-            return false, 'code_region_unreadable'
-        end
-        local protection = bit.band(region[0].protection, 0xff)
-        local executable = protection == 0x10 or protection == 0x20
-            or protection == 0x40 or protection == 0x80
-        local available = tonumber(region[0].size) - api.distance(address, region[0].base)
-        if region[0].state ~= 0x1000 or region[0].type ~= 0x1000000
-            or not executable or available < #expected then
-            return false, 'code_region_rejected'
-        end
-
-        local old, ignored = ffi.new('uint32_t[1]'), ffi.new('uint32_t[1]')
-        if kernel.VirtualProtect(address, #expected, 0x40, old) == 0 then
-            return false, 'code_protect_failed'
-        end
-        local count = ffi.new('size_t[1]')
-        local wrote = kernel.WriteProcessMemory(process, address, replacement, #replacement, count) ~= 0
-            and count[0] == #replacement
-        local flushed = wrote and kernel.FlushInstructionCache(process, address, #replacement) ~= 0
-        local restored = kernel.VirtualProtect(address, #expected, old[0], ignored) ~= 0
-        local reason
-        if not wrote then reason = 'code_write_failed'
-        elseif not flushed then reason = 'code_flush_failed'
-        elseif not restored then reason = 'code_protection_restore_failed'
-        elseif api.read(address, #replacement) ~= replacement then reason = 'code_readback_failed' end
-        if reason then
-            local rollback_old = ffi.new('uint32_t[1]')
-            kernel.VirtualProtect(address, #expected, 0x40, rollback_old)
-            count[0] = 0
-            kernel.WriteProcessMemory(process, address, expected, #expected, count)
-            kernel.FlushInstructionCache(process, address, #expected)
-            kernel.VirtualProtect(address, #expected, old[0], ignored)
-            return false, reason
-        end
-        return true, 'patched'
     end
 
     function api.pointer(bytes, offset)

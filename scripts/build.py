@@ -15,9 +15,22 @@ from module import build_module
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'src'
 TESTS = ROOT / 'tests'
-REVISION = 'data-v9'
 BUILD = ROOT / 'build'
 RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
+VARIANTS = {
+    'base': {
+        'revision': 'data-v13-native',
+        'name': 'Enemy Spawn Multiplier 6x Native Composition',
+        'description': 'Uses the native encounter budget override path at 6x, scales the encounter target to 2x with a 95 cap, keeps nonzero per-type caps and the group clamp at 5x, and shortens Patrol/Straggler intervals to one fifth. Native template weights, population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
+        'template_bias': False,
+    },
+    'light-medium': {
+        'revision': 'data-v13-light-medium',
+        'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
+        'description': 'Uses the v13 data-only spawn multipliers and favors Encounter templates with lower cost per unit. The light half receives 3.6x weight, the middle 30 percent receives 1.25x, and the heaviest 20 percent receives 0.25x. Native population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
+        'template_bias': True,
+    },
+}
 
 
 def run(args, **kwargs):
@@ -44,31 +57,43 @@ def inspect_archive(data):
 
 
 def main():
+    if len(sys.argv) == 1:
+        for key in VARIANTS:
+            print(run([sys.executable, Path(__file__), key]).strip())
+        return
+    if len(sys.argv) != 2 or sys.argv[1] not in VARIANTS:
+        raise SystemExit('Usage: build.py [base|light-medium]')
+    key = sys.argv[1]
+    variant = VARIANTS[key]
+    revision = variant['revision']
+    build = BUILD / key
     for relative, expected in [('bin/helldivers2.exe', EXE_SHA), ('data/game/game.dll', GAME_DLL_SHA)]:
         if sha((GAME / relative).read_bytes()) != expected:
             raise ValueError('Unsupported game build: ' + relative)
-    resources = build_module(ROOT, BUILD, RESOURCE, 'spawn_patch.lua', REVISION)
+    resources = build_module(ROOT, build, RESOURCE, 'spawn_patch.lua', revision,
+                             template_bias=variant['template_bias'])
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')
-    tests = run([LUA, TESTS / 'test_data.lua', SOURCE, BUILD, sha(LUA.read_bytes())], env=env)
-    (BUILD / 'offline-tests.txt').write_text(tests, encoding='utf-8')
-    data = BUILD / 'data'
+    tests = run([LUA, TESTS / 'test_data.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
+    (build / 'offline-tests.txt').write_text(tests, encoding='utf-8')
+    data = build / 'data'
     data.mkdir(exist_ok=True)
     archive = make_archive(resources)
     (data / ARCHIVE).write_bytes(archive)
     for suffix in ('.stream', '.gpu_resources'):
         (data / (ARCHIVE + suffix)).write_bytes(b'')
     inspection = inspect_archive(archive)
-    (BUILD / 'archive-inspection.json').write_text(json.dumps(inspection, indent=2) + '\n', encoding='utf-8')
+    (build / 'archive-inspection.json').write_text(json.dumps(inspection, indent=2) + '\n', encoding='utf-8')
     expected = {resource_hash(RESOURCE)}
     actual = {item['name'] for item in inspection['resources']}
     if inspection['num_files'] != 1 or actual != expected or any(item['type'] != TYPE for item in inspection['resources']):
         raise ValueError('Archive must contain only this mod module')
-    files = {f'data/{ARCHIVE}{suffix}': f'build/data/{ARCHIVE}{suffix}'
+    files = {f'data/{ARCHIVE}{suffix}': f'build/{key}/data/{ARCHIVE}{suffix}'
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
-        'name': 'Enemy Spawn Multiplier 6x', 'slug': 'EnemySpawnMultiplier',
-        'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': REVISION,
-        'description': 'Scales the encounter base budget by 6, keeps nonzero per-type caps and the group clamp at 5x, shortens Patrol/Straggler intervals to one fifth, and removes four confirmed population early exits (70, 448, desired reached, combined 100). Desired and pending queue values remain unchanged. Requires Bingus Shared Loader.',
+        'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
+        'version': 13,
+        'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
+        'description': variant['description'],
         'game_exe_sha256': EXE_SHA, 'game_dll_sha256': GAME_DLL_SHA,
         'deployment_files': files, 'files': {path: sha((ROOT / path).read_bytes()) for path in files.values()},
         'data_change': {
@@ -84,34 +109,35 @@ def main():
             'resource_table_clone': True,
             'cfg_base_offset': '0x519A4', 'cfg_stride': '0x438',
             'interval_offsets': ['0x38', '0x3c', '0x40', '0x44'], 'group_clamp_offset': '0x48',
-            'desired_offset': '0x50', 'desired_write': False,
+            'desired_offset': '0x50', 'desired_write': True, 'desired_multiplier': 2, 'desired_cap': 95,
+            'budget_override_offset': '0x78', 'budget_override_multiplier': 6,
+            'template_bias': 'relative_cost_per_unit' if variant['template_bias'] else 'native',
+            'template_bias_quantiles': {'light_max': 0.5, 'medium_max': 0.8},
+            'template_weight_multipliers': {'light': 3.6, 'medium': 1.25, 'heavy': 0.25},
             'entry_stride': '0x80', 'max_offset': '0x18',
             'budget_multiplier': 6, 'cap_multiplier': 5,
             'interval_divisor': 5, 'group_multiplier': 5,
             'mission_reset_check_seconds': 0.1, 'guardforce_changed': False,
             'live_counter_writes': False, 'pending_queue_writes': False,
             'native_timestamp_writes': False, 'runtime_verified': False,
-            'native_code_patches': [
-                {'name': 'effective_70', 'rva': '0x947E69', 'original': '7D B0', 'patched': '90 90'},
-                {'name': 'component_448', 'rva': '0x947E79', 'original': '73 A0', 'patched': '90 90'},
-                {'name': 'desired_reached', 'rva': '0x9512B9',
-                 'original': '0F 83 8D 02 00 00', 'patched': '90 90 90 90 90 90'},
-                {'name': 'combined_100', 'rva': '0x9512C5',
-                 'original': '0F 83 81 02 00 00', 'patched': '90 90 90 90 90 90'},
-            ],
+            'native_code_patches': [],
         },
-        'continuous_update_hook': True, 'shutdown_hook': False, 'executable_code_writes': 4,
+        'continuous_update_hook': True, 'shutdown_hook': False, 'executable_code_writes': 0,
+        'executable_memory_changed': False,
         'offline_tests': tests.strip().splitlines(),
     }
     report['requires'] = [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977', 'api': 1}]
     sources = list(SOURCE.glob('*.lua')) + list(TESTS.glob('*.lua')) + list((ROOT / 'scripts').glob('*.py'))
     report['source_sha256'] = {path.relative_to(ROOT).as_posix(): sha(path.read_bytes()) for path in sources}
-    release = package_release(ROOT, BUILD, report)
+    release = package_release(ROOT, build, report)
     package_tests = run([sys.executable, TESTS / 'test_package.py', release])
-    (BUILD / 'package-tests.txt').write_text(package_tests, encoding='utf-8')
+    (build / 'package-tests.txt').write_text(package_tests, encoding='utf-8')
     report['package_tests'] = package_tests.strip().splitlines()
     report['release'] = {'path': Path(os.path.relpath(release, ROOT)).as_posix(), 'sha256': sha(release.read_bytes())}
-    (BUILD / 'build-report.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    report_path = BUILD / ('build-report-' + key + '.json')
+    report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    if key == 'light-medium':
+        (BUILD / 'build-report.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(tests.strip())
     print(package_tests.strip())
     print('Built ' + release.name + '; no installation or game launch performed.')

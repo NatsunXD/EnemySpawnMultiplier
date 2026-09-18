@@ -18,9 +18,11 @@ def main():
         assert set(payloads) == expected and len(package.namelist()) == len(expected)
         assert not any(name.lower().endswith(('.dll', '.exe', '.lua', '.ps1')) for name in payloads)
         manifest = json.loads(payloads['manifest.json'])
+        provenance = json.loads(payloads['EnemySpawnMultiplier-manifest.json'])
+        display_name = provenance['name'] + ' - ' + provenance['display_version']
         assert manifest.get('Version') == 1, 'HD2MM requires an explicit V1 manifest'
-        assert manifest['Name'] == 'Enemy Spawn Multiplier 6x - v9'
-        assert manifest['Options'] == [{'Name': 'Enemy Spawn Multiplier 6x - v9', 'Description': manifest['Description'],
+        assert manifest['Name'] == display_name
+        assert manifest['Options'] == [{'Name': display_name, 'Description': manifest['Description'],
                                         'Include': ['data'], 'Image': 'thumbnail.png'}]
         assert manifest['IconPath'] == 'thumbnail.png'
         assert payloads['thumbnail.png'].startswith(b'\x89PNG\r\n\x1a\n')
@@ -34,8 +36,8 @@ def main():
             assert zlib.crc32(png[offset + 4:end]) == int.from_bytes(png[end:end + 4], 'big')
             offset = end + 4
         assert offset == len(png)
-        provenance = json.loads(payloads['EnemySpawnMultiplier-manifest.json'])
-        assert provenance['revision'] == 'data-v9' and provenance['runtime_verified'] is False
+        assert provenance['revision'] in ('data-v13-native', 'data-v13-light-medium')
+        assert provenance['display_version'] == 'v13' and provenance['runtime_verified'] is False
         assert provenance['requires'] == [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977', 'api': 1}]
         for name, digest in provenance['files'].items():
             assert hashlib.sha256(payloads[name]).hexdigest().upper() == digest
@@ -52,12 +54,13 @@ def main():
             assert struct.unpack_from('<II', main_archive, offset) == (size - 8, 2)
         assert payloads['data/' + archive_name + '.stream'] == b''
         assert payloads['data/' + archive_name + '.gpu_resources'] == b''
-        assert b'virtualprotect' in main_archive.lower()
-        assert b'flushinstructioncache' in main_archive.lower()
+        assert b'virtualprotect' not in main_archive.lower()
+        assert b'flushinstructioncache' not in main_archive.lower()
         for data in payloads.values():
             lowered = data.lower()
             assert b'users\\' not in lowered and b'users/' not in lowered
             assert b'asset-key' not in lowered and b'hd2_native_stick.dll' not in lowered
+            assert b'virtualprotect' not in lowered and b'flushinstructioncache' not in lowered
             assert b'createremotethread' not in lowered and b'loadlibrary' not in lowered
         with tempfile.TemporaryDirectory() as temporary:
             destination = Path(temporary) / 'An unrelated install location'

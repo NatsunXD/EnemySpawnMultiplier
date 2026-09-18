@@ -10,6 +10,13 @@
 local ffi
 local patch = {
     budget_multiplier = 6,
+    budget_override_multiplier = 6,
+    desired_multiplier = 2,
+    max_desired = 95,
+    template_bias_enabled = false,
+    template_bias_light = 3.6,
+    template_bias_medium = 1.25,
+    template_bias_heavy = 0.25,
     cap_multiplier = 5,
     interval_divisor = 5,
     group_multiplier = 5,
@@ -18,6 +25,13 @@ local patch = {
     time_rva = 0x276C068,
     cap_table_offset = 0x660,
     points_offset = 0x518B0,
+    candidate_pool_offset = 0x432F8,
+    candidate_count_offset = 0x5188C,
+    candidate_stride = 0xD8,
+    candidate_template_offset = 0xA8,
+    candidate_weight_offset = 0xC0,
+    candidate_cost_offset = 0xD4,
+    candidate_max = 256,
     pop_offset = 0x620, -- native ProducedFighter count; read-only diagnostic
     timer_offsets = {0x3A518, 0x3A520}, -- native timestamps; read-only
     entry_stride = 0x80,
@@ -36,6 +50,7 @@ local patch = {
     resource_table_offset = 0xF116D8,
     resource_slots = 38,
     cfg_base_offset = 0x519A4,
+    cfg_override_offset = 0x78,
     cfg_stride = 0x438,
     cfg_max = 8,
     min_interval = 0.2,
@@ -43,28 +58,16 @@ local patch = {
     min_group = 1,
     max_group = 64,
     vanilla_patrol_max_floor = 12,
-    native_patches = {
-        {name = 'effective_70', rva = 0x947E69,
-         expected = string.char(0x7D, 0xB0), replacement = string.char(0x90, 0x90)},
-        {name = 'component_448', rva = 0x947E79,
-         expected = string.char(0x73, 0xA0), replacement = string.char(0x90, 0x90)},
-        {name = 'desired_reached', rva = 0x9512B9,
-         expected = string.char(0x0F, 0x83, 0x8D, 0x02, 0x00, 0x00),
-         replacement = string.char(0x90, 0x90, 0x90, 0x90, 0x90, 0x90)},
-        {name = 'combined_100', rva = 0x9512C5,
-         expected = string.char(0x0F, 0x83, 0x81, 0x02, 0x00, 0x00),
-         replacement = string.char(0x90, 0x90, 0x90, 0x90, 0x90, 0x90)},
-    },
 }
 local originals = {}
 local clones = {block = nil, size = 0}
 local resource_clone = {source = nil, block = nil, size = 0}
+local override_state = {}
 local mission = {
     director = nil, key = nil, points_original = nil, points_applied = nil,
-    cfg = nil,
+    cfg = nil, weights = nil,
 }
 patch.detail = ''
-local native_patches_ready = false
 
 local function u32(bytes, offset)
     local a, b, c, d = bytes:byte(offset + 1, offset + 4)
@@ -102,7 +105,7 @@ local function reset()
     originals = {}
     mission.director, mission.key = nil, nil
     mission.points_original, mission.points_applied = nil, nil
-    mission.cfg = nil
+    mission.cfg, mission.weights = nil, nil
 end
 local function same_pointer(api, first, second)
     return first and second and api.distance(first, second) == 0
@@ -119,40 +122,11 @@ local function describe(points, original, valid, count, timers, pop, cfg)
         i38, i3c, i40, i44, group, desired =
             cfg.i38, cfg.i3c, cfg.i40, cfg.i44, cfg.group, cfg.desired
     end
-    patch.detail = string.format('p=%.1f/%s c=%d/%d t=%d x=%d i=%.2f-%.2f/%.2f-%.2f g=%d d=%d l=off',
+    patch.detail = string.format('p=%.1f/%s c=%d/%d t=%d x=%d i=%.2f-%.2f/%.2f-%.2f g=%d d=%d l=vanilla',
         points or 0,
         original and string.format('%.1f', original) or '-',
         valid or 0, count or 0, timers or 0, pop or 0,
         i38, i3c, i40, i44, group, desired)
-end
-local function apply_native_patches(api, game)
-    if native_patches_ready then return true end
-    if type(api.patch_code) ~= 'function' then return false, 'spawn_code_writer_missing' end
-    local applied = {}
-    for _, item in ipairs(patch.native_patches) do
-        local address = game + item.rva
-        local before = api.read(address, #item.expected)
-        if before ~= item.replacement then
-            if before ~= item.expected then
-                for index = #applied, 1, -1 do
-                    local previous = applied[index]
-                    api.patch_code(game + previous.rva, previous.replacement, previous.expected)
-                end
-                return false, 'spawn_limit_bytes_mismatch@' .. item.name
-            end
-            local ok, reason = api.patch_code(address, item.expected, item.replacement)
-            if not ok then
-                for index = #applied, 1, -1 do
-                    local previous = applied[index]
-                    api.patch_code(game + previous.rva, previous.replacement, previous.expected)
-                end
-                return false, 'spawn_limit_patch_failed@' .. item.name .. ':' .. tostring(reason)
-            end
-            applied[#applied + 1] = item
-        end
-    end
-    native_patches_ready = true
-    return true
 end
 local function retarget_table(api, director, table_bytes, rows, table_size)
     ffi = ffi or require('ffi')
@@ -240,15 +214,87 @@ local function read_pop(api, director)
     local raw = api.read(director + patch.pop_offset, 4)
     return raw and u32(raw, 0) or 0
 end
+local function scale_candidate_weights(api, director)
+    if not patch.template_bias_enabled then return 0, 0 end
+    local count_bytes = api.read(director + patch.candidate_count_offset, 4)
+    if not count_bytes then return nil, 'spawn_candidate_count_unreadable' end
+    local count = u32(count_bytes, 0)
+    if count == 0 then return 0, 0 end
+    if count > patch.candidate_max then return nil, 'spawn_candidate_count_mismatch' end
+    local base = director + patch.candidate_pool_offset
+    local size = count * patch.candidate_stride
+    if not api.writable_data(base, size) then
+        return nil, 'spawn_candidate_pool_not_writable_private_data'
+    end
+    mission.weights = mission.weights or {}
+    local candidates, densities = {}, {}
+    for index = 0, count - 1 do
+        local address = base + index * patch.candidate_stride
+        local bytes = api.read(address + patch.candidate_template_offset,
+            patch.candidate_cost_offset - patch.candidate_template_offset + 4)
+        if not bytes then return nil, 'spawn_candidate_unreadable' end
+        local template = api.pointer(bytes, 0)
+        local weight = number(bytes, patch.candidate_weight_offset - patch.candidate_template_offset)
+        local cost = number(bytes, patch.candidate_cost_offset - patch.candidate_template_offset)
+        if not template or not finite(weight) or not finite(cost)
+            or weight < 0 or weight > 1000000 or cost <= 0 or cost > 1000000 then
+            return nil, 'spawn_candidate_layout_mismatch'
+        end
+        local template_bytes = api.read(template, 0x64)
+        if not template_bytes then return nil, 'spawn_candidate_template_unreadable' end
+        local rows = u32(template_bytes, 0x60)
+        if rows < 1 or rows > 8 then return nil, 'spawn_candidate_template_layout_mismatch' end
+        local units = 0
+        for row = 0, rows - 1 do
+            local quantity = u32(template_bytes, row * 12 + 4)
+            if quantity > 1024 then return nil, 'spawn_candidate_quantity_mismatch' end
+            units = units + quantity
+        end
+        if units < 1 or units > 8192 then return nil, 'spawn_candidate_quantity_mismatch' end
+        local key = tostring(index) .. ':' .. tostring(template) .. ':' .. string.format('%.3f', cost)
+        local state = mission.weights[key]
+        if not state then
+            state = {baseline = weight, applied = nil}
+            mission.weights[key] = state
+        elseif state.applied and not near(weight, state.applied) and not near(weight, state.baseline) then
+            state.baseline, state.applied = weight, nil
+        end
+        local density = cost / units
+        candidates[#candidates + 1] = {address = address, state = state, density = density}
+        densities[#densities + 1] = density
+    end
+    table.sort(densities)
+    local light_cut = densities[math.max(1, math.ceil(#densities * 0.50))]
+    local medium_cut = densities[math.max(1, math.ceil(#densities * 0.80))]
+    for _, item in ipairs(candidates) do
+        local factor = patch.template_bias_heavy
+        if item.density <= light_cut then factor = patch.template_bias_light
+        elseif item.density <= medium_cut then factor = patch.template_bias_medium end
+        local target = item.state.baseline * factor
+        local current_bytes = api.read(item.address + patch.candidate_weight_offset, 4)
+        local current = current_bytes and number(current_bytes, 0)
+        if not current or not finite(current) then return nil, 'spawn_candidate_weight_unreadable' end
+        if not near(current, target) then
+            if not api.write(item.address + patch.candidate_weight_offset, pack_f32(target))
+                or not near(number(api.read(item.address + patch.candidate_weight_offset, 4) or '', 0), target) then
+                return nil, 'spawn_candidate_weight_write_failed'
+            end
+        end
+        item.state.applied = target
+    end
+    return #candidates, count
+end
 local function copy_cfg(cfg)
     return {
         i38 = cfg.i38, i3c = cfg.i3c, i40 = cfg.i40, i44 = cfg.i44,
-        group = cfg.group, desired = cfg.desired,
+        group = cfg.group, desired = cfg.desired, override = cfg.override,
     }
 end
 local function read_config(api, address)
     local bytes = api.read(address + 0x38, 0x1c)
     if not bytes or #bytes < 0x1c then return nil end
+    local override_bytes = api.read(address + patch.cfg_override_offset, 4)
+    if not override_bytes then return nil end
     local cfg = {
         i38 = number(bytes, 0),
         i3c = number(bytes, 4),
@@ -256,8 +302,10 @@ local function read_config(api, address)
         i44 = number(bytes, 12),
         group = u32(bytes, 0x10),
         desired = u32(bytes, 0x18),
+        override = number(override_bytes, 0),
     }
-    if not (finite(cfg.i38) and finite(cfg.i3c) and finite(cfg.i40) and finite(cfg.i44)) then
+    if not (finite(cfg.i38) and finite(cfg.i3c) and finite(cfg.i40) and finite(cfg.i44)
+        and finite(cfg.override)) then
         return nil
     end
     if cfg.i38 <= 0 or cfg.i3c <= 0 or cfg.i40 <= 0 or cfg.i44 <= 0 then return nil end
@@ -361,7 +409,8 @@ local function scale_config(api, game, director)
     mission.cfg = mission.cfg or {}
     local cfg = read_config(api, address)
     if not cfg then return 0, nil, 'spawn_config_layout_mismatch@' .. source end
-    if not api.writable_data(address + 0x38, 0x14) then
+    if not api.writable_data(address + 0x38, 0x1c)
+        or not api.writable_data(address + patch.cfg_override_offset, 4) then
         return 0, nil, 'spawn_config_not_writable_private_data@' .. source
     end
     local key = source .. ':' .. tostring(address)
@@ -371,6 +420,12 @@ local function scale_config(api, game, director)
             baseline = copy_cfg(cfg)
         else
             local restored = math.floor(cfg.group / patch.group_multiplier + 0.5)
+            local restored_desired = cfg.desired
+            if cfg.desired % patch.desired_multiplier == 0
+                and cfg.desired / patch.desired_multiplier >= 1
+                and cfg.desired / patch.desired_multiplier <= patch.max_desired then
+                restored_desired = cfg.desired / patch.desired_multiplier
+            end
             if cfg.group % patch.group_multiplier == 0
                 and restored >= patch.min_group and restored <= patch.max_group then
                 baseline = {
@@ -379,7 +434,8 @@ local function scale_config(api, game, director)
                     i40 = cfg.i40 * patch.interval_divisor,
                     i44 = cfg.i44 * patch.interval_divisor,
                     group = restored,
-                    desired = cfg.desired,
+                    desired = restored_desired,
+                    override = cfg.override,
                 }
             else
                 baseline = copy_cfg(cfg)
@@ -397,6 +453,9 @@ local function scale_config(api, game, director)
     if tgroup > patch.max_group * patch.group_multiplier then
         tgroup = patch.max_group * patch.group_multiplier
     end
+    local tdesired = math.floor(baseline.desired * patch.desired_multiplier + 0.5)
+    if tdesired < 1 then tdesired = 1 end
+    if tdesired > patch.max_desired then tdesired = patch.max_desired end
     if not write_interval(api, address, 0x38, cfg.i38, t38)
         or not write_interval(api, address, 0x3c, cfg.i3c, t3c)
         or not write_interval(api, address, 0x40, cfg.i40, t40)
@@ -409,17 +468,46 @@ local function scale_config(api, game, director)
             return nil, 'spawn_group_write_failed'
         end
     end
+    if cfg.desired ~= tdesired then
+        if not api.write(address + 0x50, pack_u32(tdesired))
+            or u32(api.read(address + 0x50, 4) or '', 0) ~= tdesired then
+            return nil, 'spawn_desired_write_failed'
+        end
+    end
+    local override_target
+    local state_key = tostring(address)
+    local state = override_state[state_key]
+    if cfg.override > 0 then
+        if state and near(cfg.override, state.applied) then
+            override_target = state.applied
+        else
+            override_target = cfg.override * patch.budget_override_multiplier
+        end
+    else
+        local points_bytes = api.read(director + patch.points_offset, 4)
+        local base_points = points_bytes and number(points_bytes, 0) or 0
+        if finite(base_points) and base_points > 0 then
+            override_target = base_points * patch.budget_override_multiplier
+        end
+    end
+    if override_target and override_target > 0 then
+        if not near(cfg.override, override_target) then
+            if not api.write(address + patch.cfg_override_offset, pack_f32(override_target))
+                or not near(number(api.read(address + patch.cfg_override_offset, 4) or '', 0), override_target) then
+                return nil, 'spawn_budget_override_write_failed'
+            end
+        end
+        override_state[state_key] = {applied = override_target}
+    end
     scaled = 1
     first = {
         i38 = t38, i3c = t3c, i40 = t40, i44 = t44,
-        group = tgroup, desired = cfg.desired,
+        group = tgroup, desired = tdesired,
     }
     return scaled, first, source .. '@' .. tostring(address)
 end
 
 function patch.apply(api, game)
-    local patched, patch_reason = apply_native_patches(api, game)
-    if not patched then return false, patch_reason, false end
     if not in_mission(api, game) then
         reset()
         describe()
@@ -468,7 +556,7 @@ function patch.apply(api, game)
         originals = {}
         mission.director, mission.key = director, key
         mission.points_original, mission.points_applied = nil, nil
-        mission.cfg = nil
+        mission.cfg, mission.weights = nil, nil
     end
     local points_bytes = api.read(director + patch.points_offset, 8)
     if not points_bytes then return false, 'spawn_points_unreadable', false end
@@ -534,12 +622,15 @@ function patch.apply(api, game)
 
     local ok, reason = scale_points(api, director, points)
     if not ok then return false, reason, false end
+    local weighted, candidate_count = scale_candidate_weights(api, director)
+    if weighted == nil then return false, candidate_count, false end
     local configs, cfg_live, cfg_reason = scale_config(api, game, director)
     if configs == nil then return false, cfg_live, false end
     local pop_live = read_pop(api, director)
     local scaled_points = mission.points_applied or points
     describe(scaled_points, mission.points_original, valid, count, 0, pop_live, cfg_live)
-    patch.detail = patch.detail .. ' cfg=' .. tostring(cfg_reason)
+    patch.detail = patch.detail .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
+        .. ' cfg=' .. tostring(cfg_reason)
     if configs > 0 then
         return true, 'spawn_multiplier_ready', true
     end

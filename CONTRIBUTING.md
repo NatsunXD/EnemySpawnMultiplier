@@ -14,6 +14,6 @@ $env:HD2_GAME_ROOT = 'D:\SteamLibrary\steamapps\common\Helldivers 2'
 python -B scripts/build.py
 ```
 
-The builder verifies the supported EXE and game.dll hashes, compiles the Lua module, runs synthetic memory checks, inspects the archive in Python, and writes `releases/Enemy-Spawn-Multiplier-6x-v9.zip`. It does not install or launch the game.
+The builder verifies the supported EXE and game.dll hashes, compiles both Lua variants, runs synthetic memory checks, and inspects each archive in Python. It writes `releases/Enemy-Spawn-Multiplier-6x-Native-Composition-v13.zip` and `releases/Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v13.zip`. Pass `base` or `light-medium` to build only one variant. It does not install or launch the game.
 
 This package requires Bingus Shared Loader with `mods/cowboybingus/enemy_spawn_multiplier` in the coordinator list.

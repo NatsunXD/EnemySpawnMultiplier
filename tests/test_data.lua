@@ -37,10 +37,10 @@ local resource_manager_storage = ffi.new('uint8_t[?]', patch.resource_table_offs
 local resource_manager = ffi.cast('uint8_t *', resource_manager_storage)
 local resource_storage = ffi.new('uint8_t[?]', 0x260 + 38 * patch.cfg_stride)
 local resource_root = ffi.cast('uint8_t *', resource_storage)
+local bias_templates_storage = ffi.new('uint8_t[?]', 5 * 0x100)
+local bias_templates = ffi.cast('uint8_t *', bias_templates_storage)
 local resource_root_live = resource_root
 local image_mode, director_present, mode_present, time_present, writes = false, false, false, false, 0
-local native_code, code_writes = {}, 0
-for _, item in ipairs(patch.native_patches) do native_code[item.rva] = item.expected end
 
 local function pointer(value) return ffi.string(ffi.new('void *[1]', value), 8) end
 local function put_ptr(dest, value) ffi.copy(dest, ffi.new('void *[1]', value), 8) end
@@ -65,12 +65,6 @@ end
 
 local api = setmetatable({}, {__index = real})
 api.read = function(address, size)
-    for _, item in ipairs(patch.native_patches) do
-        if real.distance(address, game + item.rva) == 0 then
-            local bytes = native_code[item.rva]
-            return #bytes == size and bytes or nil
-        end
-    end
     if real.distance(address, game + patch.cfg_invalid_generation_rva) == 0 then
         return string.rep('\255', 4)
     end
@@ -96,19 +90,6 @@ api.read = function(address, size)
         return pointer(time)
     end
     return real.read(address, size)
-end
-api.patch_code = function(address, expected, replacement)
-    for _, item in ipairs(patch.native_patches) do
-        if real.distance(address, game + item.rva) == 0 then
-            local current = native_code[item.rva]
-            if current == replacement then return true, 'already_patched' end
-            if current ~= expected then return false, 'original_bytes_mismatch' end
-            native_code[item.rva] = replacement
-            code_writes = code_writes + 1
-            return true, 'patched'
-        end
-    end
-    return false, 'unexpected_address'
 end
 api.write = function(address, bytes)
     writes = writes + 1
@@ -195,12 +176,11 @@ end
 
 writes = 0
 local ok, reason, active = patch.apply(api, game)
-assert(ok and reason == 'waiting_for_mission' and not active and writes == 0 and code_writes == 4)
-for _, item in ipairs(patch.native_patches) do assert(native_code[item.rva] == item.replacement) end
+assert(ok and reason == 'waiting_for_mission' and not active and writes == 0)
 ship()
 ok, reason, active = patch.apply(api, game)
-assert(ok and reason == 'waiting_for_mission' and not active and writes == 0 and code_writes == 4)
-pass('four population gates patch once; ship state waits without data writes')
+assert(ok and reason == 'waiting_for_mission' and not active and writes == 0)
+pass('native executable code remains untouched; ship state waits without data writes')
 
 mission(vanilla, 100, 50)
 ok, reason, active = patch.apply(api, game)
@@ -274,6 +254,21 @@ local function assert_config(min8, max8, min1, max1, group, desired)
     assert(get_u32(cfg + 0x50) == (desired or 30))
     assert(approx(get_f32(cfg + 0x80), 2))
 end
+local function fill_candidate(index, weight, cost, units)
+    local candidate = director + patch.candidate_pool_offset + index * patch.candidate_stride
+    local template = bias_templates + index * 0x100
+    ffi.fill(template, 0x100, 0)
+    put_u32(template, index + 1)
+    put_u32(template + 4, units)
+    put_u32(template + 0x60, 1)
+    put_ptr(candidate + patch.candidate_template_offset, template)
+    put_f32(candidate + patch.candidate_weight_offset, weight)
+    put_f32(candidate + patch.candidate_cost_offset, cost)
+end
+local function candidate_weight(index)
+    return get_f32(director + patch.candidate_pool_offset
+        + index * patch.candidate_stride + patch.candidate_weight_offset)
+end
 
 director_present = false
 assert(patch.apply(api, game))
@@ -281,14 +276,14 @@ mission(vanilla, 100, 50)
 fill_config(20, 40, 8, 14, 10, 30)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
-assert_config(4, 8, 8 / 5, 14 / 5, 50, 30)
+assert_config(4, 8, 8 / 5, 14 / 5, 50, 60)
 local cfg_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == cfg_writes)
-assert_config(4, 8, 8 / 5, 14 / 5, 50, 30)
+assert_config(4, 8, 8 / 5, 14 / 5, 50, 60)
 assert(get_f32(director + patch.points_offset) == 600)
-assert(patch.detail:find('d=30', 1, true) and patch.detail:find('l=off', 1, true))
-pass('budget grows 6x; intervals shrink 5x; group clamp grows 5x; desired stays vanilla')
+assert(patch.detail:find('d=60', 1, true) and patch.detail:find('l=vanilla', 1, true))
+pass('budget and override grow 6x; desired target grows 2x; intervals shrink 5x')
 
 director_present = false
 assert(patch.apply(api, game))
@@ -298,6 +293,28 @@ ok, reason, active = patch.apply(api, game)
 assert(ok and active)
 assert_config(4, 8, 8 / 5, 14 / 5, 50, 30)
 pass('already-scaled spawn config is not multiplied again')
+
+director_present = false
+assert(patch.apply(api, game))
+mission(vanilla, 100, 50)
+fill_config(20, 40, 8, 14, 10, 30)
+patch.template_bias_enabled = true
+put_u32(director + patch.candidate_count_offset, 5)
+fill_candidate(0, 1, 10, 10)
+fill_candidate(1, 1, 20, 10)
+fill_candidate(2, 1, 30, 10)
+fill_candidate(3, 1, 80, 10)
+fill_candidate(4, 1, 200, 10)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and reason == 'spawn_multiplier_ready')
+assert(approx(candidate_weight(0), 3.6) and approx(candidate_weight(1), 3.6))
+assert(approx(candidate_weight(2), 3.6) and approx(candidate_weight(3), 1.25))
+assert(approx(candidate_weight(4), 0.25))
+assert(patch.detail:find('w=5/5', 1, true))
+local bias_writes = writes
+assert(patch.apply(api, game) and writes == bias_writes)
+patch.template_bias_enabled = false
+pass('template cost per unit biases light and medium candidates without stacking')
 
 director_present = false
 assert(patch.apply(api, game))
@@ -559,40 +576,8 @@ mission(vanilla, 100, 50)
 fill_config(20, 40, 8, 14, 10, 60)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
-assert_config(4, 8, 8 / 5, 14 / 5, 50, 60)
-assert(patch.detail:find('d=60', 1, true))
-pass('desired count remains read-only')
+assert_config(4, 8, 8 / 5, 14 / 5, 50, 95)
+assert(patch.detail:find('d=95', 1, true))
+pass('desired target is capped below the native combined-100 gate')
 
-local rollback_patch = assert(loadfile(source .. '/spawn_patch.lua'))()
-local rollback_code, rollback_writes = {}, 0
-for _, item in ipairs(rollback_patch.native_patches) do rollback_code[item.rva] = item.expected end
-local mismatch = rollback_patch.native_patches[3]
-rollback_code[mismatch.rva] = string.rep('\0', #mismatch.expected)
-local rollback_api = {}
-rollback_api.read = function(address, size)
-    for _, item in ipairs(rollback_patch.native_patches) do
-        if real.distance(address, game + item.rva) == 0 then
-            local bytes = rollback_code[item.rva]
-            return #bytes == size and bytes or nil
-        end
-    end
-end
-rollback_api.patch_code = function(address, expected, replacement)
-    for _, item in ipairs(rollback_patch.native_patches) do
-        if real.distance(address, game + item.rva) == 0 then
-            if rollback_code[item.rva] ~= expected then return false, 'original_bytes_mismatch' end
-            rollback_code[item.rva] = replacement
-            rollback_writes = rollback_writes + 1
-            return true, 'patched'
-        end
-    end
-    return false, 'unexpected_address'
-end
-ok, reason, active = rollback_patch.apply(rollback_api, game)
-assert(not ok and not active and reason == 'spawn_limit_bytes_mismatch@desired_reached')
-assert(rollback_writes == 4)
-assert(rollback_code[rollback_patch.native_patches[1].rva] == rollback_patch.native_patches[1].expected)
-assert(rollback_code[rollback_patch.native_patches[2].rva] == rollback_patch.native_patches[2].expected)
-assert(rollback_code[mismatch.rva] == string.rep('\0', #mismatch.expected))
-pass('a later native-byte mismatch rolls earlier code edits back')
-print(count .. ' data-only spawn multiplier checks passed; no game process was accessed.')
+print(count .. ' data-only spawn multiplier checks passed; no executable code was modified.')
