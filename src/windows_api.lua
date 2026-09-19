@@ -79,18 +79,6 @@ return function()
         return address
     end
 
-    function api.bind_spawn_enqueue(game)
-        local address = game + 0x948FA0
-        local expected = '\64\85\86\87\65\84\65\85\65\86\65\87\72\141\172\36'
-        if api.read(address, #expected) ~= expected then return nil end
-        local native = ffi.cast(
-            'void (*)(void *, void *, uint8_t, const void *, uint32_t, const void *, const void *, float)',
-            address)
-        return function(director, descriptor, flag, transform, kind, position, payload, delay)
-            native(director, descriptor, flag, transform, kind, position, payload, delay)
-        end
-    end
-
     function api.writable_data(address, size)
         if size <= 0 then return false end
         local cursor = ffi.cast('uint8_t *', address)

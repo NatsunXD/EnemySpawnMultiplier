@@ -20,15 +20,15 @@ RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
 IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
 VARIANTS = {
     'base': {
-        'revision': 'native-queue-v17-native',
+        'revision': 'data-v16-native',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
-        'description': 'Applies the 6x encounter and 10x data tuning, then re-enqueues one native copy of each approved Encounter and Patrol request. Native template weights are preserved. Executable code remains unchanged. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and reduces Illuminate static-guard budget to preserve reinforcement capacity. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': False,
     },
     'light-medium': {
-        'revision': 'native-queue-v17-light-medium',
+        'revision': 'data-v16-light-medium',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
-        'description': 'Applies the 6x encounter and 10x data tuning, favors lower-cost Encounter templates where supported, and re-enqueues one native copy of each approved Encounter and Patrol request. Executable code remains unchanged. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. Unsupported faction template layouts fall back to native weights instead of stopping the core tuning. Illuminate static-guard budget is reduced to preserve reinforcement capacity. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
     },
 }
@@ -92,7 +92,7 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 17,
+        'version': 16,
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],
         'game_exe_sha256': EXE_SHA, 'game_dll_sha256': GAME_DLL_SHA,
@@ -117,16 +117,13 @@ def main():
             'template_bias_quantiles': {'light_max': 0.5, 'medium_max': 0.8},
             'template_weight_multipliers': {'light': 3.6, 'medium': 1.25, 'heavy': 0.25},
             'template_bias_unsupported_layout': 'native_weight_fallback',
-            'faction_cap_counts': {'automaton': 61, 'terminid': 44, 'illuminate': 45},
+            'faction_cap_counts': {'automaton': 48, 'terminid': 44, 'illuminate': 42},
             'illuminate_guardforce_multiplier': 0.25,
             'entry_stride': '0x80', 'max_offset': '0x18',
             'budget_multiplier': 6, 'cap_multiplier': 10,
             'interval_divisor': 10, 'group_multiplier': 10,
             'mission_reset_check_seconds': 0.1, 'guardforce_changed': 'illuminate_only',
-            'live_counter_writes': False, 'pending_queue_writes': 'native_enqueue_only',
-            'queue_replay': {'rva': '0x948FA0', 'copies': 1,
-                             'types': ['Patrol', 'Encounter'], 'poll': 'every_game_update'},
-            'native_function_calls': ['game.dll+0x948FA0'],
+            'live_counter_writes': False, 'pending_queue_writes': False,
             'native_timestamp_writes': 'future_deadline_clamp_only', 'runtime_verified': False,
             'native_code_patches': [],
         },

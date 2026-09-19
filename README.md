@@ -18,7 +18,7 @@
 
 1. 关闭游戏。
 2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases) 并设置为最高优先级。
-3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v17.zip` 或 `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v17.zip`，二选一。
+3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip` 或 `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`，二选一。
 4. 重新部署并重启游戏。
 
 ## 🤝 参与贡献
@@ -46,13 +46,13 @@
 <details>
 <summary>English</summary>
 
-v17 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages. Native Composition preserves native Encounter template weights. Light-Medium Bias ranks supported candidate pools by cost per planned unit and falls back to native weights when a faction uses an incompatible template layout.
+v16 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages. Native Composition preserves native Encounter template weights. Light-Medium Bias ranks supported candidate pools by cost per planned unit and falls back to native weights when a faction uses an incompatible template layout.
 
-Both variants use the native Encounter budget override at `6x`, scale nonzero per-type caps and the group clamp to `10x`, and divide Patrol/Straggler intervals by `10`. Each approved Encounter or Patrol request is re-enqueued once through the game's native queue function, producing two scheduled requests in total. Future deadlines longer than the new maximum interval are clamped. The desired target stays native because scaling it can make the native combined-100 rejection fire more often.
+Both variants use the native Encounter budget override at `6x`, scale nonzero per-type caps and the group clamp to `10x`, and divide Patrol/Straggler intervals by `10`. Future deadlines longer than the new maximum interval are clamped so the initial native delay and failed-position-query backoff do not hide the faster configuration. The desired target stays native because scaling it can make the native combined-100 rejection fire more often.
 
-The mod does not modify executable pages. It writes validated private data and calls the game's existing enqueue function on the game update thread. Illuminate GuardForce budget is reduced to one quarter during initialization so static defenders leave capacity under the shared native population gate. Admission gates and position checks remain active for original requests; approved Encounter and Patrol requests receive one native duplicate.
+The mod changes writable private data only and does not modify executable pages. Illuminate GuardForce budget is reduced to one quarter during initialization so static defenders leave capacity under the shared native population gate. Native population gates, position checks, template availability, and queue processing remain active.
 
-Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install either `Enemy-Spawn-Multiplier-6x-Native-Composition-v17.zip` or `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v17.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
+Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install either `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip` or `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 
