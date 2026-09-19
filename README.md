@@ -7,7 +7,7 @@
 
 具体改动： 延长了拉烟时间以及刷怪的数量、减少了巡逻队刷新的CD、增加了刷怪上限
 
-### V17版本已适配原版Bingus Shared Loader v15 或更新版本
+### V15往后版本已适配原版Bingus Shared Loader v15 或更新版本
 
 - `Native Composition`：游戏想怎么刷就怎么刷
 - `Light-Medium Bias`：刷怪更倾向于刷中轻甲
