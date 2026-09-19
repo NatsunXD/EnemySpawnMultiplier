@@ -21,6 +21,24 @@
 3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v15.zip` 或 `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v15.zip`，二选一。
 4. 重新部署并重启游戏。
 
+## 🤝 参与贡献
+
+欢迎任何形式的贡献！以下是标准贡献流程：
+
+1. **Fork 仓库** - 点击右上角 Fork 按钮创建您的副本
+2. **创建分支** - 基于开发分支创建特性分支：
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+3. **提交修改** - 编写清晰的提交信息：
+   ```bash
+   git commit -m "feat: 添加新功能" -m "详细描述..."
+   ```
+4. **推送更改** - 将分支推送到您的远程仓库：
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+5. **发起 PR** - 在 GitHub 上创建 Pull Request 到原仓库的 `main` 分支
 
 
 [技术说明](docs/TECHNICAL.md) | [构建说明](CONTRIBUTING.md) | [安装说明](INSTALL.txt)
