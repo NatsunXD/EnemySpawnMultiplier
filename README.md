@@ -2,10 +2,12 @@
 
 ## 中文说明
 目前还不是很完善，主要是自己跟朋友一起玩嫌怪太少了所以用AI来搓了一个
+
 毕竟修改了游戏刷怪相关的机制，所以最好是自己玩或者和朋友一起玩哦，不要去恶搞路人！！！
+
 具体改动： 延长了拉烟时间以及刷怪的数量、减少了巡逻队刷新的CD、增加了刷怪上限
 
-v15 适用于 Steam build `24826606` / EXE `1.8.45317.0`，
+### V15版本已适配原版Bingus Shared Loader v15 或更新版本
 
 - `Native Composition`：游戏想怎么刷就怎么刷
 - `Light-Medium Bias`：刷怪更倾向于刷中轻甲
@@ -15,11 +17,11 @@ v15 适用于 Steam build `24826606` / EXE `1.8.45317.0`，
 ### 安装
 
 1. 关闭游戏。
-2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15)。
+2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases) 并设置为最高优先级。
 3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v15.zip` 或 `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v15.zip`，二选一。
-4. 删除旧版 Enemy Spawn Multiplier 条目，重新部署并重启游戏。
+4. 重新部署并重启游戏。
 
-两个版本均通过合成内存行为测试和发布包检查。实战数量仍会受到阵营、难度、地图、出生位置和原生人口门槛影响。
+
 
 [技术说明](docs/TECHNICAL.md) | [构建说明](CONTRIBUTING.md) | [安装说明](INSTALL.txt)
 
