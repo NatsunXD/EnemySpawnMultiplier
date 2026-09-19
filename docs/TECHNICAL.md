@@ -1,4 +1,4 @@
-# Enemy Spawn Multiplier v15 variants
+# Enemy Spawn Multiplier v16 variants
 
 The release targets Steam build `24826606` / EXE `1.8.45317.0`. Addresses are
 `game.dll` RVAs or offsets from the named runtime object. Static evidence is in
@@ -11,6 +11,14 @@ change executable pages or import `VirtualProtect` or
 `FlushInstructionCache`. Read-only resource tables and image-backed cap tables
 are copied to private writable allocations before their owning pointer is
 retargeted. Every supported executable and `game.dll` is hash checked first.
+
+The object referenced by `director+0x660` is `0xB0` bytes, although its first
+`0x10` bytes are enough to locate the cap rows. Native function `0x93F0E0`
+copies and consumes the complete object. v16 therefore preserves all `0xB0`
+bytes in the private clone and places the copied rows after it. The older
+`0x10`-byte clone overlapped internal fields with row data; the captured
+Automaton crash was an access violation at `game.dll+0x93F210` while native
+code read the invalid address `0x6406AF11` from the corrupted internal table.
 
 ## Loader v15 integration
 
@@ -31,9 +39,10 @@ the manager at `game.dll+0x276F0C0`, offset `+0xF116D8`. Only the resolved
 
 ## Data changes
 
-| Field | Meaning | v15 behavior |
+| Field | Meaning | v16 behavior |
 |---|---|---|
 | `director+0x518B0` | Encounter composition budget | `6x` |
+| `director+0x518B4` | GuardForce/static defender budget | Illuminate only: `0.25x` |
 | `cfg+0x78` | Positive native budget override | `6x` baseline |
 | cap table row `+0x18` | Nonzero per-type maximum | `10x` |
 | `cfg+0x38/+0x3C` | Straggler min/max interval | `/10`, minimum 0.1 s |
@@ -48,7 +57,7 @@ On each 100 ms module check, a pending deadline is changed only when it is later
 than `now + scaled maximum interval`. A due deadline or a future deadline already
 inside that window is left alone. This prevents repeated timer division while
 allowing an existing vanilla deadline or native 5-second query-failure retry to
-adopt the faster v15 schedule.
+adopt the faster v16 schedule.
 
 `cfg+0x50` is deliberately no longer scaled. Native function `0x9511F0` first
 checks the active component count against the scaled target, then rejects when
@@ -64,7 +73,7 @@ combined-100 exits. The 70 calculation contains queued quantity and component
 counts with type exceptions; it is not a single configurable all-enemy cap.
 
 Earlier releases removed these branches by changing executable bytes and were
-reported to trigger anti-cheat termination. v15 does not restore that method.
+reported to trigger anti-cheat termination. v16 does not restore that method.
 The `10x` cap and group fields raise data-driven limits and can allow a request
 to be larger before a native gate rejects later work, while `/10` intervals and
 deadline clamping make eligible requests occur much more consistently. They do
@@ -84,13 +93,26 @@ and ranks it within the current faction and difficulty. The lowest 50% receives
 `3.6x` weight, the next 30% receives `1.25x`, and the highest 20% receives
 `0.25x`. Baselines are retained so repeated checks do not stack multipliers.
 
+Faction cap-table cardinality identifies the active roster: Automaton 48,
+Terminid 44, and Illuminate 42. Candidate structures are not identical across
+all three factions. If the optional bias reader sees an unsupported layout, it
+logs the reason, leaves weights native, and continues the core tuning. This
+prevents the earlier Automaton path from stopping after budget/cap writes but
+before config and timer changes.
+
+Illuminate's 42-row table also gates a `0.25x` GuardForce budget adjustment.
+The write occurs at the budget source during initialization; no live type count,
+queue entry, or existing unit is modified. Reducing static defenders creates
+headroom under the unchanged shared population checks.
+
 ## Diagnostics and validation
 
-The log revision is `data-v15-native` or `data-v15-light-medium`. `p=` reports
-Encounter budget, `c=` cap rows, `i=` scaled Straggler/Patrol intervals, `g=`
-group clamp, `d=` unchanged desired target, `t=` deadlines shortened on the
-latest check, `w=` biased/available candidates, and `cfg=` the active resolver
-result. `l=vanilla` confirms executable population branches are unchanged.
+The log revision is `data-v16-native` or `data-v16-light-medium`. `p=` reports
+Encounter budget, `gf=` GuardForce current/original budget, `f=` detected
+faction, `c=` cap rows, `i=` scaled Straggler/Patrol intervals, `g=` group clamp,
+`d=` unchanged desired target, `t=` deadlines shortened on the latest check,
+`w=` biased/available candidates or its fallback reason, and `cfg=` the active
+resolver result. `l=vanilla` confirms executable population branches are unchanged.
 
 Offline tests use synthetic private allocations to cover budget/cap scaling,
 timer clamping, idempotence, config resolution, resource and cap-table cloning,

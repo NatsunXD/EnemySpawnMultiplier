@@ -20,15 +20,15 @@ RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
 IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
 VARIANTS = {
     'base': {
-        'revision': 'data-v15-native',
+        'revision': 'data-v16-native',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
-        'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and clamps already scheduled timers to the new maximum interval. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and reduces Illuminate static-guard budget to preserve reinforcement capacity. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': False,
     },
     'light-medium': {
-        'revision': 'data-v15-light-medium',
+        'revision': 'data-v16-light-medium',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
-        'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. The light half receives 3.6x weight, the middle 30 percent receives 1.25x, and the heaviest 20 percent receives 0.25x. Native population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. Unsupported faction template layouts fall back to native weights instead of stopping the core tuning. Illuminate static-guard budget is reduced to preserve reinforcement capacity. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
     },
 }
@@ -92,13 +92,14 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 15,
+        'version': 16,
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],
         'game_exe_sha256': EXE_SHA, 'game_dll_sha256': GAME_DLL_SHA,
         'deployment_files': files, 'files': {path: sha((ROOT / path).read_bytes()) for path in files.values()},
         'data_change': {
-            'director_pointer_rva': '0x276CA20', 'mode_rva': '0x276c3d0', 'cap_table_offset': '0x660',
+            'director_pointer_rva': '0x276CA20', 'mode_rva': '0x276c3d0',
+            'cap_table_offset': '0x660', 'cap_header_clone_size': '0xB0',
             'encounter_points_offset': '0x518B0', 'guardforce_points_offset': '0x518B4',
             'pop_counter_offset': '0x620', 'timer_offsets': ['0x3A518', '0x3A520'],
             'config_resolver': 'native_handle_hash_with_resource_fallback', 'config_handle_offset': '0x6B0',
@@ -115,10 +116,13 @@ def main():
             'template_bias': 'relative_cost_per_unit' if variant['template_bias'] else 'native',
             'template_bias_quantiles': {'light_max': 0.5, 'medium_max': 0.8},
             'template_weight_multipliers': {'light': 3.6, 'medium': 1.25, 'heavy': 0.25},
+            'template_bias_unsupported_layout': 'native_weight_fallback',
+            'faction_cap_counts': {'automaton': 48, 'terminid': 44, 'illuminate': 42},
+            'illuminate_guardforce_multiplier': 0.25,
             'entry_stride': '0x80', 'max_offset': '0x18',
             'budget_multiplier': 6, 'cap_multiplier': 10,
             'interval_divisor': 10, 'group_multiplier': 10,
-            'mission_reset_check_seconds': 0.1, 'guardforce_changed': False,
+            'mission_reset_check_seconds': 0.1, 'guardforce_changed': 'illuminate_only',
             'live_counter_writes': False, 'pending_queue_writes': False,
             'native_timestamp_writes': 'future_deadline_clamp_only', 'runtime_verified': False,
             'native_code_patches': [],

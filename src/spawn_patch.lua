@@ -4,9 +4,10 @@
 -- handle/hash resolver for the 0x438 config at director+0x519A4, not from
 -- encounter points. Encounter points are a per-reinforcement composition
 -- budget; they are not a remaining pool and do not control how often waves
--- fire. Guardforce / static POI budgets stay vanilla. Zero per-type cap rows
--- are a native skip. Population counters remain read-only. Existing Patrol and
--- Straggler deadlines are only shortened when they exceed the scaled maximum.
+-- fire. Illuminate GuardForce budget is reduced before static POI population
+-- fills the shared native gate. Zero per-type cap rows are a native skip.
+-- Population counters remain read-only. Existing Patrol and Straggler deadlines
+-- are only shortened when they exceed the scaled maximum.
 local ffi
 local patch = {
     budget_multiplier = 6,
@@ -15,6 +16,8 @@ local patch = {
     template_bias_light = 3.6,
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
+    illuminate_guardforce_multiplier = 0.25,
+    faction_cap_counts = {automaton = 48, terminid = 44, illuminate = 42},
     cap_multiplier = 10,
     interval_divisor = 10,
     group_multiplier = 10,
@@ -22,6 +25,7 @@ local patch = {
     mode_rva = 0x276c3d0,
     time_rva = 0x276C068,
     cap_table_offset = 0x660,
+    cap_header_size = 0xB0,
     points_offset = 0x518B0,
     candidate_pool_offset = 0x432F8,
     candidate_count_offset = 0x5188C,
@@ -64,6 +68,7 @@ local resource_clone = {source = nil, block = nil, size = 0}
 local override_state = {}
 local mission = {
     director = nil, key = nil, points_original = nil, points_applied = nil,
+    guardforce_original = nil, guardforce_applied = nil,
     cfg = nil, weights = nil,
 }
 patch.detail = ''
@@ -116,6 +121,7 @@ local function reset()
     originals = {}
     mission.director, mission.key = nil, nil
     mission.points_original, mission.points_applied = nil, nil
+    mission.guardforce_original, mission.guardforce_applied = nil, nil
     mission.cfg, mission.weights = nil, nil
 end
 local function same_pointer(api, first, second)
@@ -127,30 +133,41 @@ local function in_mission(api, game)
     local mode_bytes = api.read(mode, 12)
     return mode_bytes ~= nil and u32(mode_bytes, 8) ~= 0
 end
-local function describe(points, original, valid, count, timers, pop, cfg)
+local function faction_name(count)
+    for name, expected in pairs(patch.faction_cap_counts) do
+        if count == expected then return name end
+    end
+    return 'unknown'
+end
+local function describe(points, original, valid, count, timers, pop, cfg,
+                        guardforce, guardforce_original, faction)
     local i38, i3c, i40, i44, group, desired = 0, 0, 0, 0, 0, 0
     if cfg then
         i38, i3c, i40, i44, group, desired =
             cfg.i38, cfg.i3c, cfg.i40, cfg.i44, cfg.group, cfg.desired
     end
-    patch.detail = string.format('p=%.1f/%s c=%d/%d t=%d x=%d i=%.2f-%.2f/%.2f-%.2f g=%d d=%d l=vanilla',
+    patch.detail = string.format('p=%.1f/%s gf=%.1f/%s f=%s c=%d/%d t=%d x=%d i=%.2f-%.2f/%.2f-%.2f g=%d d=%d l=vanilla',
         points or 0,
         original and string.format('%.1f', original) or '-',
+        guardforce or 0,
+        guardforce_original and string.format('%.1f', guardforce_original) or '-',
+        faction or 'unknown',
         valid or 0, count or 0, timers or 0, pop or 0,
         i38, i3c, i40, i44, group, desired)
 end
 local function retarget_table(api, director, table_bytes, rows, table_size)
     ffi = ffi or require('ffi')
-    local size = 16 + table_size
+    local size = patch.cap_header_size + table_size
     if not clones.block or clones.size < size then
         clones.block = api.alloc_private(size)
         clones.size = clones.block and size or 0
         if not clones.block then return nil, 'spawn_clone_alloc_failed' end
     end
     local block = clones.block
-    local copy = block + 16
+    local copy = block + patch.cap_header_size
     ffi.copy(copy, rows, table_size)
-    ffi.copy(block, pack_ptr(copy) .. table_bytes:sub(9, 16), 16)
+    ffi.copy(block, table_bytes, patch.cap_header_size)
+    ffi.copy(block, pack_ptr(copy), 8)
     if not api.writable_data(block, size) then
         return nil, 'spawn_clone_not_writable_private_data'
     end
@@ -221,6 +238,25 @@ local function scale_points(api, director, points)
     end
     return true
 end
+local function scale_guardforce(api, director, guardforce, faction)
+    if faction ~= 'illuminate' or not (guardforce > 0) then return true, guardforce end
+    if not mission.guardforce_original then
+        mission.guardforce_original = guardforce
+    elseif not near(guardforce, mission.guardforce_original)
+        and not near(guardforce, mission.guardforce_applied or -1) then
+        mission.guardforce_original = guardforce
+    end
+    local target = mission.guardforce_original * patch.illuminate_guardforce_multiplier
+    if not near(guardforce, target) then
+        if not api.writable_data(director + patch.points_offset + 4, 4)
+            or not api.write(director + patch.points_offset + 4, pack_f32(target))
+            or not near(number(api.read(director + patch.points_offset + 4, 4) or '', 0), target) then
+            return false, 'spawn_guardforce_write_failed'
+        end
+    end
+    mission.guardforce_applied = target
+    return true, target
+end
 local function read_pop(api, director)
     local raw = api.read(director + patch.pop_offset, 4)
     return raw and u32(raw, 0) or 0
@@ -228,14 +264,14 @@ end
 local function scale_candidate_weights(api, director)
     if not patch.template_bias_enabled then return 0, 0 end
     local count_bytes = api.read(director + patch.candidate_count_offset, 4)
-    if not count_bytes then return nil, 'spawn_candidate_count_unreadable' end
+    if not count_bytes then return 0, 0, 'spawn_candidate_count_unreadable' end
     local count = u32(count_bytes, 0)
     if count == 0 then return 0, 0 end
-    if count > patch.candidate_max then return nil, 'spawn_candidate_count_mismatch' end
+    if count > patch.candidate_max then return 0, count, 'spawn_candidate_count_mismatch' end
     local base = director + patch.candidate_pool_offset
     local size = count * patch.candidate_stride
     if not api.writable_data(base, size) then
-        return nil, 'spawn_candidate_pool_not_writable_private_data'
+        return 0, count, 'spawn_candidate_pool_not_writable_private_data'
     end
     mission.weights = mission.weights or {}
     local candidates, densities = {}, {}
@@ -243,25 +279,25 @@ local function scale_candidate_weights(api, director)
         local address = base + index * patch.candidate_stride
         local bytes = api.read(address + patch.candidate_template_offset,
             patch.candidate_cost_offset - patch.candidate_template_offset + 4)
-        if not bytes then return nil, 'spawn_candidate_unreadable' end
+        if not bytes then return 0, count, 'spawn_candidate_unreadable' end
         local template = api.pointer(bytes, 0)
         local weight = number(bytes, patch.candidate_weight_offset - patch.candidate_template_offset)
         local cost = number(bytes, patch.candidate_cost_offset - patch.candidate_template_offset)
         if not template or not finite(weight) or not finite(cost)
             or weight < 0 or weight > 1000000 or cost <= 0 or cost > 1000000 then
-            return nil, 'spawn_candidate_layout_mismatch'
+            return 0, count, 'spawn_candidate_layout_mismatch'
         end
         local template_bytes = api.read(template, 0x64)
-        if not template_bytes then return nil, 'spawn_candidate_template_unreadable' end
+        if not template_bytes then return 0, count, 'spawn_candidate_template_unreadable' end
         local rows = u32(template_bytes, 0x60)
-        if rows < 1 or rows > 8 then return nil, 'spawn_candidate_template_layout_mismatch' end
+        if rows < 1 or rows > 8 then return 0, count, 'spawn_candidate_template_layout_mismatch' end
         local units = 0
         for row = 0, rows - 1 do
             local quantity = u32(template_bytes, row * 12 + 4)
-            if quantity > 1024 then return nil, 'spawn_candidate_quantity_mismatch' end
+            if quantity > 1024 then return 0, count, 'spawn_candidate_quantity_mismatch' end
             units = units + quantity
         end
-        if units < 1 or units > 8192 then return nil, 'spawn_candidate_quantity_mismatch' end
+        if units < 1 or units > 8192 then return 0, count, 'spawn_candidate_quantity_mismatch' end
         local key = tostring(index) .. ':' .. tostring(template) .. ':' .. string.format('%.3f', cost)
         local state = mission.weights[key]
         if not state then
@@ -543,7 +579,7 @@ function patch.apply(api, game)
     local entries, table_bytes, rows, table_size, count = nil, nil, nil, 0, 0
     local pending, valid, key = {}, 0, 'none'
     if header then
-        table_bytes = api.read(header, 16)
+        table_bytes = api.read(header, patch.cap_header_size)
         if not table_bytes then return false, 'spawn_table_unreadable', false end
         entries = api.pointer(table_bytes, 0)
         count = u32(table_bytes, 8)
@@ -575,6 +611,7 @@ function patch.apply(api, game)
         originals = {}
         mission.director, mission.key = director, key
         mission.points_original, mission.points_applied = nil, nil
+        mission.guardforce_original, mission.guardforce_applied = nil, nil
         mission.cfg, mission.weights = nil, nil
     end
     local points_bytes = api.read(director + patch.points_offset, 8)
@@ -594,8 +631,10 @@ function patch.apply(api, game)
     local current = api.pointer(api.read(game + patch.director_rva, 8))
     if not same_pointer(api, current, director)
         or (header_bytes and api.read(director + patch.cap_table_offset, 16) ~= header_bytes)
+        or (table_bytes and api.read(header, patch.cap_header_size) ~= table_bytes)
         or (rows and api.read(entries, table_size) ~= rows) then
-        describe(points, mission.points_original, valid, count, 0, 0)
+        describe(points, mission.points_original, valid, count, 0, 0, nil,
+            guardforce, mission.guardforce_original, faction_name(count))
         return true, 'waiting_for_stable_mission', false
     end
 
@@ -641,7 +680,10 @@ function patch.apply(api, game)
 
     local ok, reason = scale_points(api, director, points)
     if not ok then return false, reason, false end
-    local weighted, candidate_count = scale_candidate_weights(api, director)
+    local faction = faction_name(count)
+    local guard_ok, scaled_guardforce = scale_guardforce(api, director, guardforce, faction)
+    if not guard_ok then return false, scaled_guardforce, false end
+    local weighted, candidate_count, bias_reason = scale_candidate_weights(api, director)
     if weighted == nil then return false, candidate_count, false end
     local configs, cfg_live, cfg_reason = scale_config(api, game, director)
     if configs == nil then return false, cfg_live, false end
@@ -649,8 +691,10 @@ function patch.apply(api, game)
     if timers == nil then return false, timer_reason, false end
     local pop_live = read_pop(api, director)
     local scaled_points = mission.points_applied or points
-    describe(scaled_points, mission.points_original, valid, count, timers, pop_live, cfg_live)
+    describe(scaled_points, mission.points_original, valid, count, timers, pop_live, cfg_live,
+        scaled_guardforce, mission.guardforce_original, faction)
     patch.detail = patch.detail .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
+        .. (bias_reason and (':' .. bias_reason) or '')
         .. ' cfg=' .. tostring(cfg_reason)
     if configs > 0 then
         return true, 'spawn_multiplier_ready', true

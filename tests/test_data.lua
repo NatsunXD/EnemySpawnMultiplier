@@ -15,13 +15,13 @@ pass('copied restricted writer hashes modules and refuses module pages')
 local DIRECTOR_SIZE = 0x54000
 local director_storage = ffi.new('uint8_t[?]', DIRECTOR_SIZE)
 local director = ffi.cast('uint8_t *', director_storage)
-local header_storage = ffi.new('uint8_t[16]')
+local header_storage = ffi.new('uint8_t[?]', patch.cap_header_size)
 local header = ffi.cast('uint8_t *', header_storage)
-local image_storage = ffi.new('uint8_t[16]')
+local image_storage = ffi.new('uint8_t[?]', patch.cap_header_size)
 local image = ffi.cast('uint8_t *', image_storage)
-local image_entries_storage = ffi.new('uint8_t[?]', 8 * patch.entry_stride)
+local image_entries_storage = ffi.new('uint8_t[?]', 64 * patch.entry_stride)
 local image_entries = ffi.cast('uint8_t *', image_entries_storage)
-local entries_storage = ffi.new('uint8_t[?]', 8 * patch.entry_stride)
+local entries_storage = ffi.new('uint8_t[?]', 64 * patch.entry_stride)
 local entries = ffi.cast('uint8_t *', entries_storage)
 local mode_storage = ffi.new('uint8_t[0x44]')
 local mode = ffi.cast('uint8_t *', mode_storage)
@@ -102,9 +102,9 @@ end
 api.writable_data = function(address, size)
     if image_mode then
         local delta = real.distance(address, image)
-        if delta >= 0 and delta < 16 then return false end
+        if delta >= 0 and delta < patch.cap_header_size then return false end
         delta = real.distance(address, image_entries)
-        if delta >= 0 and delta < 8 * patch.entry_stride then return false end
+        if delta >= 0 and delta < 64 * patch.entry_stride then return false end
     end
     return real.writable_data(address, size)
 end
@@ -120,15 +120,15 @@ local function fill_entry(index, ident, maximum)
 end
 
 local function snapshot()
-    return ffi.string(director_storage, DIRECTOR_SIZE) .. ffi.string(header_storage, 16) ..
-        ffi.string(entries_storage, 8 * patch.entry_stride)
+    return ffi.string(director_storage, DIRECTOR_SIZE) .. ffi.string(header_storage, patch.cap_header_size) ..
+        ffi.string(entries_storage, 64 * patch.entry_stride)
 end
 
 local function mission(caps, points, guardforce)
     director_present, image_mode, mode_present, time_present = true, false, true, true
     ffi.fill(director_storage, DIRECTOR_SIZE, 0)
-    ffi.fill(header_storage, 16, 0)
-    ffi.fill(entries_storage, 8 * patch.entry_stride, 0)
+    ffi.fill(header_storage, patch.cap_header_size, 0)
+    ffi.fill(entries_storage, 64 * patch.entry_stride, 0)
     ffi.fill(mode_storage, 0x44, 0)
     ffi.fill(time_storage, 32, 0)
     ffi.fill(handle_storage, 16, 0)
@@ -158,7 +158,7 @@ end
 local function ship()
     director_present, image_mode, mode_present, time_present = true, true, true, true
     ffi.fill(director_storage, DIRECTOR_SIZE, 0)
-    ffi.fill(image_storage, 16, 0)
+    ffi.fill(image_storage, patch.cap_header_size, 0)
     ffi.fill(mode_storage, 0x44, 0)
     ffi.fill(time_storage, 32, 0)
     put_ptr(director + patch.cap_table_offset, image)
@@ -168,6 +168,11 @@ local function ship()
 end
 
 local vanilla = {{101, 8}, {202, 7}, {303, 10}}
+local function faction_caps(count, first)
+    local caps = {}
+    for index = 1, count do caps[index] = {first + index, 1} end
+    return caps
+end
 local function assert_caps(expected)
     for index, value in ipairs(expected) do
         assert(get_u32(entries + (index - 1) * patch.entry_stride + patch.max_offset) == value)
@@ -201,11 +206,11 @@ pass('even and odd caps and encounter points scale once; guardforce and native c
 director_present = false
 assert(patch.apply(api, game))
 mission({{101, 0}, {202, 0}, {303, 0}}, 600, 600)
-local zero_rows = ffi.string(entries_storage, 8 * patch.entry_stride)
+local zero_rows = ffi.string(entries_storage, 64 * patch.entry_stride)
 writes = 0
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_partial')
-assert(ffi.string(entries_storage, 8 * patch.entry_stride) == zero_rows)
+assert(ffi.string(entries_storage, 64 * patch.entry_stride) == zero_rows)
 assert(get_f32(director + patch.points_offset) == 3600)
 assert(get_f32(director + patch.points_offset + 4) == 600)
 assert(get_u32(director + patch.pop_offset) == 0)
@@ -330,6 +335,40 @@ pass('template cost per unit biases light and medium candidates without stacking
 
 director_present = false
 assert(patch.apply(api, game))
+mission(faction_caps(48, 1000), 100, 50)
+fill_config(20, 40, 8, 14, 10, 30)
+patch.template_bias_enabled = true
+put_u32(director + patch.candidate_count_offset, 1)
+fill_candidate(0, 1, 20, 10)
+put_u32(bias_templates + 0x60, 0)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and reason == 'spawn_multiplier_ready')
+assert_config(2, 4, 0.8, 1.4, 100, 30)
+assert(approx(get_f32(director + patch.points_offset), 600))
+assert(approx(get_f32(director + patch.points_offset + 4), 50))
+assert(approx(candidate_weight(0), 1))
+assert(patch.detail:find('f=automaton', 1, true))
+assert(patch.detail:find('w=0/1:spawn_candidate_template_layout_mismatch', 1, true))
+patch.template_bias_enabled = false
+pass('unsupported Automaton template layout falls back to native weights without stopping core tuning')
+
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(42, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and reason == 'spawn_multiplier_ready')
+assert(approx(get_f32(director + patch.points_offset), 600))
+assert(approx(get_f32(director + patch.points_offset + 4), 150))
+assert(patch.detail:find('gf=150.0/600.0', 1, true))
+assert(patch.detail:find('f=illuminate', 1, true))
+local illuminate_writes = writes
+assert(patch.apply(api, game) and writes == illuminate_writes)
+assert(approx(get_f32(director + patch.points_offset + 4), 150))
+pass('Illuminate GuardForce budget drops to one quarter without changing live counters')
+
+director_present = false
+assert(patch.apply(api, game))
 mission(vanilla, 100, 50)
 fill_config(20, 40, 8, 14, 10, 30)
 local decoy = ffi.string(director + patch.cfg_base_offset, patch.cfg_stride)
@@ -388,7 +427,7 @@ director_present = false
 assert(patch.apply(api, game))
 director_present, image_mode, mode_present, time_present = true, true, true, true
 ffi.fill(director_storage, DIRECTOR_SIZE, 0)
-ffi.fill(image_storage, 16, 0)
+ffi.fill(image_storage, patch.cap_header_size, 0x5A)
 ffi.fill(image_entries_storage, 8 * patch.entry_stride, 0)
 ffi.fill(mode_storage, 0x44, 0)
 ffi.fill(time_storage, 32, 0)
@@ -403,12 +442,14 @@ end
 put_f32(director + patch.points_offset, 100)
 put_f32(director + patch.points_offset + 4, 50)
 local image_before = ffi.string(image_entries_storage, 8 * patch.entry_stride)
+local image_header_tail = ffi.string(image + 8, patch.cap_header_size - 8)
 writes = 0
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_partial')
 assert(ffi.string(image_entries_storage, 8 * patch.entry_stride) == image_before)
 local cloned_header = api.pointer(api.read(director + patch.cap_table_offset, 8))
 assert(cloned_header and real.distance(cloned_header, image) ~= 0)
+assert(ffi.string(cloned_header + 8, patch.cap_header_size - 8) == image_header_tail)
 local cloned_entries = api.pointer(api.read(cloned_header, 8))
 assert(cloned_entries and real.distance(cloned_entries, image_entries) ~= 0)
 assert(get_u32(cloned_entries + patch.max_offset) == 80)
