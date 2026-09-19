@@ -39,7 +39,7 @@ def package_release(root: Path, build: Path, report: dict) -> Path:
         'runtime_verified': False,
         'files': {name: digest(data) for name, data in files.items()},
     }
-    for key in ('requires', 'provides'):
+    for key in ('requires', 'provides', 'loader_integration'):
         if key in report:
             provenance[key] = report[key]
     files[slug + '-manifest.json'] = (json.dumps(provenance, indent=2) + '\n').encode()

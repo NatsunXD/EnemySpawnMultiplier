@@ -26,6 +26,15 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
     bytecode = output.read_bytes()
     if bytecode[:5] != b'\x1bLJ\x02\x02':
         raise ValueError('LuaJIT bytecode mode differs from the game')
-    resource = struct.pack('<II', len(bytecode), 2) + bytecode
-    (build / 'mod.lua.main').write_bytes(resource)
-    return {resource_hash(module_name): resource}
+    implementation_name = module_name + '_impl'
+    entry = (f'-- HD2-Addon: {module_name}\n'
+             f"return require('{implementation_name}')\n").encode('ascii')
+    entry_resource = struct.pack('<II', len(entry), 2) + entry
+    implementation_resource = struct.pack('<II', len(bytecode), 2) + bytecode
+    (build / 'entry.lua').write_bytes(entry)
+    (build / 'entry.lua.main').write_bytes(entry_resource)
+    (build / 'mod.lua.main').write_bytes(implementation_resource)
+    return {
+        resource_hash(module_name): entry_resource,
+        resource_hash(implementation_name): implementation_resource,
+    }

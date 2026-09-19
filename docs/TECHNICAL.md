@@ -1,4 +1,4 @@
-# Enemy Spawn Multiplier v14 variants
+# Enemy Spawn Multiplier v15 variants
 
 The release targets Steam build `24826606` / EXE `1.8.45317.0`. Addresses are
 `game.dll` RVAs or offsets from the named runtime object. Static evidence is in
@@ -12,6 +12,17 @@ change executable pages or import `VirtualProtect` or
 are copied to private writable allocations before their owning pointer is
 retargeted. Every supported executable and `game.dll` is hash checked first.
 
+## Loader v15 integration
+
+The archive contains two Lua resources. The stable entry resource
+`mods/cowboybingus/enemy_spawn_multiplier` is plaintext and begins exactly with
+`-- HD2-Addon: mods/cowboybingus/enemy_spawn_multiplier`. This is the declaration
+scanned by the official Bingus Shared Loader v15. It forwards once to the
+LuaJIT-bytecode resource `mods/cowboybingus/enemy_spawn_multiplier_impl`, which
+contains the existing module. The declaration name hashes to the entry resource,
+so no loader registry change is required. Explicit legacy registration of the
+stable entry remains compatible.
+
 The active director is read from `game.dll+0x276CA20`. The config handle at
 `director+0x6B0` is resolved through the native-style generation hash table at
 `director+0x51960`. Hash misses use the 38-slot resource-key table referenced by
@@ -20,7 +31,7 @@ the manager at `game.dll+0x276F0C0`, offset `+0xF116D8`. Only the resolved
 
 ## Data changes
 
-| Field | Meaning | v14 behavior |
+| Field | Meaning | v15 behavior |
 |---|---|---|
 | `director+0x518B0` | Encounter composition budget | `6x` |
 | `cfg+0x78` | Positive native budget override | `6x` baseline |
@@ -37,7 +48,7 @@ On each 100 ms module check, a pending deadline is changed only when it is later
 than `now + scaled maximum interval`. A due deadline or a future deadline already
 inside that window is left alone. This prevents repeated timer division while
 allowing an existing vanilla deadline or native 5-second query-failure retry to
-adopt the faster v14 schedule.
+adopt the faster v15 schedule.
 
 `cfg+0x50` is deliberately no longer scaled. Native function `0x9511F0` first
 checks the active component count against the scaled target, then rejects when
@@ -53,7 +64,7 @@ combined-100 exits. The 70 calculation contains queued quantity and component
 counts with type exceptions; it is not a single configurable all-enemy cap.
 
 Earlier releases removed these branches by changing executable bytes and were
-reported to trigger anti-cheat termination. v14 does not restore that method.
+reported to trigger anti-cheat termination. v15 does not restore that method.
 The `10x` cap and group fields raise data-driven limits and can allow a request
 to be larger before a native gate rejects later work, while `/10` intervals and
 deadline clamping make eligible requests occur much more consistently. They do
@@ -75,7 +86,7 @@ and ranks it within the current faction and difficulty. The lowest 50% receives
 
 ## Diagnostics and validation
 
-The log revision is `data-v14-native` or `data-v14-light-medium`. `p=` reports
+The log revision is `data-v15-native` or `data-v15-light-medium`. `p=` reports
 Encounter budget, `c=` cap rows, `i=` scaled Straggler/Patrol intervals, `g=`
 group clamp, `d=` unchanged desired target, `t=` deadlines shortened on the
 latest check, `w=` biased/available candidates, and `cfg=` the active resolver
@@ -84,6 +95,7 @@ result. `l=vanilla` confirms executable population branches are unchanged.
 Offline tests use synthetic private allocations to cover budget/cap scaling,
 timer clamping, idempotence, config resolution, resource and cap-table cloning,
 template bias, mission rebuilds, queue/counter preservation, and failure paths.
-Package tests verify the manifest, hashes, resource identity, absence of custom
-DLLs, and absence of executable-page modification APIs. Runtime verification
-remains false until a matching game build is tested.
+Package tests verify the manifest, hashes, both resource identities, the exact
+v15 discovery declaration and forwarding target, absence of custom DLLs, and
+absence of executable-page modification APIs. Runtime verification remains false
+until a matching game build is tested.

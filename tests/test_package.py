@@ -36,22 +36,42 @@ def main():
             assert zlib.crc32(png[offset + 4:end]) == int.from_bytes(png[end:end + 4], 'big')
             offset = end + 4
         assert offset == len(png)
-        assert provenance['revision'] in ('data-v14-native', 'data-v14-light-medium')
-        assert provenance['display_version'] == 'v14' and provenance['runtime_verified'] is False
-        assert provenance['requires'] == [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977', 'api': 1}]
+        assert provenance['revision'] in ('data-v15-native', 'data-v15-light-medium')
+        assert provenance['display_version'] == 'v15' and provenance['runtime_verified'] is False
+        assert provenance['requires'] == [{'name': 'Bingus Shared Loader',
+                                           'guid': '612eaf70-d682-43c7-9efd-16dcc695f977',
+                                           'api': 1, 'minimum_version': 15}]
+        assert provenance['loader_integration'] == {
+            'minimum_loader_version': 15,
+            'api': 1,
+            'discovery_entry': 'mods/cowboybingus/enemy_spawn_multiplier',
+            'implementation_resource': 'mods/cowboybingus/enemy_spawn_multiplier_impl',
+            'legacy_registry_compatible': True,
+        }
         for name, digest in provenance['files'].items():
             assert hashlib.sha256(payloads[name]).hexdigest().upper() == digest
         main_archive = payloads['data/' + archive_name]
-        assert struct.unpack_from('<III', main_archive) == (0xF0000011, 1, 1)
+        assert struct.unpack_from('<III', main_archive) == (0xF0000011, 1, 2)
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
         from archive import resource_hash
-        entries = [struct.unpack_from('<7Q6I', main_archive, 104 + index * 80) for index in range(1)]
-        assert {entry[0] for entry in entries} == {resource_hash('mods/cowboybingus/enemy_spawn_multiplier')}
+        entry_name = 'mods/cowboybingus/enemy_spawn_multiplier'
+        implementation_name = entry_name + '_impl'
+        entries = [struct.unpack_from('<7Q6I', main_archive, 104 + index * 80) for index in range(2)]
+        assert {entry[0] for entry in entries} == {resource_hash(entry_name), resource_hash(implementation_name)}
+        resources = {}
         for index, entry in enumerate(entries):
             assert entry[1] == 0xA14E8DFA2CD117E2 and entry[-1] == index
             offset, size = entry[2], entry[7]
             assert offset % 16 == 0 and offset + size <= len(main_archive)
             assert struct.unpack_from('<II', main_archive, offset) == (size - 8, 2)
+            resources[entry[0]] = main_archive[offset + 8:offset + size]
+        declaration = ('-- HD2-Addon: ' + entry_name + '\n').encode('ascii')
+        expected_entry = declaration + ("return require('" + implementation_name + "')\n").encode('ascii')
+        assert resources[resource_hash(entry_name)] == expected_entry
+        assert resources[resource_hash(entry_name)].startswith(declaration)
+        assert len(declaration) <= 256 and not resources[resource_hash(entry_name)].startswith(b'\xef\xbb\xbf')
+        assert not resources[resource_hash(entry_name)].startswith(b'\x1bLJ')
+        assert resources[resource_hash(implementation_name)].startswith(b'\x1bLJ\x02\x02')
         assert payloads['data/' + archive_name + '.stream'] == b''
         assert payloads['data/' + archive_name + '.gpu_resources'] == b''
         assert b'virtualprotect' not in main_archive.lower()
@@ -67,7 +87,8 @@ def main():
             package.extractall(destination)
             assert all((destination / name).read_bytes() == data for name, data in payloads.items())
     print('PASS: archive contents, V1 manager manifest, hashes, resource identity, privacy and relocation')
-    print('6 package checks passed; ZIP contains three runtime archive files and no custom DLL.')
+    print('PASS: official loader v15 declaration is plaintext, first, hash-matched and forwards to bytecode')
+    print('7 package checks passed; ZIP contains three runtime archive files and no custom DLL.')
 
 
 if __name__ == '__main__':

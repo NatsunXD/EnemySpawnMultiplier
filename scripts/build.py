@@ -17,17 +17,18 @@ SOURCE = ROOT / 'src'
 TESTS = ROOT / 'tests'
 BUILD = ROOT / 'build'
 RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
+IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
 VARIANTS = {
     'base': {
-        'revision': 'data-v14-native',
+        'revision': 'data-v15-native',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
-        'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and clamps already scheduled timers to the new maximum interval. Native template weights, population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
+        'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and clamps already scheduled timers to the new maximum interval. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': False,
     },
     'light-medium': {
-        'revision': 'data-v14-light-medium',
+        'revision': 'data-v15-light-medium',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
-        'description': 'Uses the v14 data-only spawn multipliers and favors Encounter templates with lower cost per unit. The light half receives 3.6x weight, the middle 30 percent receives 1.25x, and the heaviest 20 percent receives 0.25x. Native population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
+        'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. The light half receives 3.6x weight, the middle 30 percent receives 1.25x, and the heaviest 20 percent receives 0.25x. Native population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
     },
 }
@@ -51,7 +52,7 @@ def inspect_archive(data):
         if offset % 16 or offset + size > len(data):
             raise ValueError('Archive resource is misaligned')
         if struct.unpack_from('<II', data, offset) != (size - 8, 2):
-            raise ValueError('Archive resource is not Lua bytecode')
+            raise ValueError('Archive resource is not a Lua resource')
         resources.append({'name': entry[0], 'type': entry[1], 'offset': offset, 'size': size, 'index': entry[12]})
     return {'num_files': count, 'resources': resources}
 
@@ -83,15 +84,15 @@ def main():
         (data / (ARCHIVE + suffix)).write_bytes(b'')
     inspection = inspect_archive(archive)
     (build / 'archive-inspection.json').write_text(json.dumps(inspection, indent=2) + '\n', encoding='utf-8')
-    expected = {resource_hash(RESOURCE)}
+    expected = {resource_hash(RESOURCE), resource_hash(IMPLEMENTATION_RESOURCE)}
     actual = {item['name'] for item in inspection['resources']}
-    if inspection['num_files'] != 1 or actual != expected or any(item['type'] != TYPE for item in inspection['resources']):
+    if inspection['num_files'] != 2 or actual != expected or any(item['type'] != TYPE for item in inspection['resources']):
         raise ValueError('Archive must contain only this mod module')
     files = {f'data/{ARCHIVE}{suffix}': f'build/{key}/data/{ARCHIVE}{suffix}'
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 14,
+        'version': 15,
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],
         'game_exe_sha256': EXE_SHA, 'game_dll_sha256': GAME_DLL_SHA,
@@ -124,9 +125,15 @@ def main():
         },
         'continuous_update_hook': True, 'shutdown_hook': False, 'executable_code_writes': 0,
         'executable_memory_changed': False,
+        'loader_integration': {
+            'minimum_loader_version': 15, 'api': 1,
+            'discovery_entry': RESOURCE, 'implementation_resource': IMPLEMENTATION_RESOURCE,
+            'legacy_registry_compatible': True,
+        },
         'offline_tests': tests.strip().splitlines(),
     }
-    report['requires'] = [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977', 'api': 1}]
+    report['requires'] = [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977',
+                           'api': 1, 'minimum_version': 15}]
     sources = list(SOURCE.glob('*.lua')) + list(TESTS.glob('*.lua')) + list((ROOT / 'scripts').glob('*.py'))
     report['source_sha256'] = {path.relative_to(ROOT).as_posix(): sha(path.read_bytes()) for path in sources}
     release = package_release(ROOT, build, report)

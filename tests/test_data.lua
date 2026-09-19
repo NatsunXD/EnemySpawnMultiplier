@@ -560,6 +560,17 @@ setfenv(assert(loadfile(build .. '/mod.ljbc')), env)()
 assert(env.update == previous and env.EnemySpawnMultiplier.active == false)
 pass('compiled module rejects the non-game test host')
 
+local required_name, required_count
+local entry_env = setmetatable({require = function(name)
+    required_name, required_count = name, (required_count or 0) + 1
+    return 'implementation-loaded'
+end}, {__index = _G})
+entry_env._G = entry_env
+local entry_chunk = assert(loadfile(build .. '/entry.lua')); setfenv(entry_chunk, entry_env)
+assert(entry_chunk() == 'implementation-loaded')
+assert(required_name == 'mods/cowboybingus/enemy_spawn_multiplier_impl' and required_count == 1)
+pass('v15 discovery entry preserves the legacy resource name and forwards once')
+
 director_present = false
 assert(patch.apply(api, game))
 mission(vanilla, 100, 50)

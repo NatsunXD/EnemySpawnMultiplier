@@ -1,15 +1,17 @@
-Enemy Spawn Multiplier 6x - v14 variants
+Enemy Spawn Multiplier 6x - v15 variants
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
-- Enemy-Spawn-Multiplier-6x-Native-Composition-v14.zip
-- Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v14.zip
+- Enemy-Spawn-Multiplier-6x-Native-Composition-v15.zip
+- Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v15.zip
 
-Keep Bingus Shared Loader enabled, deploy with HDArsenal or HD2MM, and restart
-the game. Both variants use the same resource ID and cannot be combined.
+Install and enable the official Bingus Shared Loader v15 or newer, deploy with
+HDArsenal or HD2MM, and restart the game. Loader v15 discovers this mod from its
+declared addon entry; no loader registry edit or custom fork is required. Both
+variants use the same resource ID and cannot be combined.
 
-v14 keeps the Encounter budget override at 6x, raises nonzero per-type caps and
+v15 keeps the Encounter budget override at 6x, raises nonzero per-type caps and
 the group clamp to 10x, and divides Patrol/Straggler intervals by 10. Typical
 20-40 second Straggler intervals become 2-4 seconds, 8-14 second Patrol
 intervals become 0.8-1.4 seconds, and a group clamp of 10 becomes 100.
@@ -31,14 +33,14 @@ unit. The lightest 50% receives 3.6x selection weight, the middle 30% receives
 weights unchanged.
 
 After a mission starts, inspect %LOCALAPPDATA%/EnemySpawnMultiplier.log.
-data-v14-native or data-v14-light-medium plus spawn_multiplier_ready means the
+data-v15-native or data-v15-light-medium plus spawn_multiplier_ready means the
 active config was resolved. Expected values for the common 20-40 / 8-14 / 10
 config are i=2.00-4.00/0.80-1.40 g=100. t= reports how many overlong deadlines
 were shortened during the latest check. cfg= shows the selected config source.
 l=vanilla confirms the native population branches were not patched.
 
 The native 70/448 population gates, position queries and queue processing still
-apply. v14 improves effective density through higher data caps, larger allowed
+apply. v15 improves effective density through higher data caps, larger allowed
 groups and shorter scheduling delays; it does not remove executable-code gates.
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy
