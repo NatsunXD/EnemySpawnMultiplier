@@ -41,6 +41,7 @@ local bias_templates_storage = ffi.new('uint8_t[?]', 5 * 0x100)
 local bias_templates = ffi.cast('uint8_t *', bias_templates_storage)
 local resource_root_live = resource_root
 local image_mode, director_present, mode_present, time_present, writes = false, false, false, false, 0
+local enqueue_calls = 0
 
 local function pointer(value) return ffi.string(ffi.new('void *[1]', value), 8) end
 local function put_ptr(dest, value) ffi.copy(dest, ffi.new('void *[1]', value), 8) end
@@ -107,6 +108,25 @@ api.writable_data = function(address, size)
         if delta >= 0 and delta < 64 * patch.entry_stride then return false end
     end
     return real.writable_data(address, size)
+end
+api.bind_spawn_enqueue = function(bound_game)
+    assert(bound_game == game)
+    return function(bound_director, descriptor, flag, transform, kind, position, payload, delay)
+        assert(bound_director == director and delay == 0)
+        local tail, head = get_u32(director + patch.queue_tail_offset),
+            get_u32(director + patch.queue_head_offset)
+        local following = (tail + 1) % patch.queue_slots
+        if following == head then return end
+        local target = director + patch.queue_base_offset + tail * patch.queue_stride
+        ffi.copy(target, payload, patch.queue_stride)
+        put_ptr(target + patch.queue_descriptor_offset, descriptor)
+        ffi.copy(target + patch.queue_transform_offset, transform, 0x40)
+        ffi.copy(target + patch.queue_position_offset, position, 12)
+        put_u32(target + patch.queue_type_offset, kind)
+        target[patch.queue_flag_offset] = flag
+        put_u32(director + patch.queue_tail_offset, following)
+        enqueue_calls = enqueue_calls + 1
+    end
 end
 
 local function fill_row(base, index, ident, maximum)
@@ -335,7 +355,7 @@ pass('template cost per unit biases light and medium candidates without stacking
 
 director_present = false
 assert(patch.apply(api, game))
-mission(faction_caps(48, 1000), 100, 50)
+mission(faction_caps(61, 1000), 100, 50)
 fill_config(20, 40, 8, 14, 10, 30)
 patch.template_bias_enabled = true
 put_u32(director + patch.candidate_count_offset, 1)
@@ -354,7 +374,7 @@ pass('unsupported Automaton template layout falls back to native weights without
 
 director_present = false
 assert(patch.apply(api, game))
-mission(faction_caps(42, 2000), 100, 600)
+mission(faction_caps(45, 2000), 100, 600)
 fill_config(20, 40, 8, 14, 10, 30)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
@@ -549,7 +569,7 @@ pass('page, read, write and reset-race failures do not broaden the layout')
 
 local identity = {revision = 'fixture', exe_sha256 = 'exe', game_sha256 = 'game'}
 for _, mode in ipairs({'success', 'spawn_failure', 'exe', 'game', 'ffi'}) do
-    local updates, checks, factories = 0, 0, 0
+    local updates, checks, observers, factories = 0, 0, 0, 0
     local env = setmetatable({print = function() end, os = {getenv = function() end}}, {__index = _G})
     env._G = env
     local shutdown = function() end
@@ -569,7 +589,7 @@ for _, mode in ipairs({'success', 'spawn_failure', 'exe', 'game', 'ffi'}) do
     local probe = {apply = function()
         checks = checks + 1
         return mode ~= 'spawn_failure', checks == 1 and 'waiting_for_mission' or 'spawn_multiplier_ready', checks > 1
-    end}
+    end, observe = function() observers = observers + 1 end}
     local chunk = assert(loadfile(source .. '/archive_loader.lua')); setfenv(chunk, env)
     local loader = chunk(); setfenv(loader, env)
     loader(factory, probe, identity)
@@ -577,6 +597,7 @@ for _, mode in ipairs({'success', 'spawn_failure', 'exe', 'game', 'ffi'}) do
     for _ = 1, 5 do env.update(0.1, 123) end
     assert(updates == 5 and factories == 1 and env.shutdown == shutdown)
     assert(checks == ((mode == 'ffi' or mode == 'exe' or mode == 'game') and 0 or mode == 'spawn_failure' and 1 or 5))
+    assert(observers == (mode == 'success' and 5 or mode == 'spawn_failure' and 1 or 0))
     assert(env.EnemySpawnMultiplier.active == (mode == 'success'))
 end
 pass('loader handles failures, duplicate initialization and existing update callbacks')
@@ -631,8 +652,39 @@ local queue_after = ffi.string(director + queue_counter_offset, 0x20)
 assert(queue_after == queue_before)
 assert(get_u32(director + queue_counter_offset) == 8)
 assert(get_u32(queue_slot + queue_quantity_offset) == 6)
-assert(not patch.detail:find('q=', 1, true) and not patch.detail:find('qf=', 1, true))
-pass('pending queue quantity and accounting remain read-only')
+assert(patch.detail:find('q=0/0', 1, true))
+pass('ordinary apply leaves pending queue quantity and accounting unchanged')
+
+patch.observe(api, game) -- establish the current native tail
+local descriptor_storage = ffi.new('uint8_t[24]')
+local descriptor = ffi.cast('uint8_t *', descriptor_storage)
+local template_storage = ffi.new('uint8_t[100]')
+local template = ffi.cast('uint8_t *', template_storage)
+put_ptr(descriptor, template)
+local function native_request(kind)
+    local tail = get_u32(director + patch.queue_tail_offset)
+    local slot = director + patch.queue_base_offset + tail * patch.queue_stride
+    ffi.fill(slot, patch.queue_stride, 0)
+    put_ptr(slot + patch.queue_descriptor_offset, descriptor)
+    put_u32(slot + patch.queue_type_offset, kind)
+    put_u32(slot + patch.queue_quantity_offset, 1)
+    put_u32(director + patch.queue_tail_offset, (tail + 1) % patch.queue_slots)
+    put_u32(director + patch.queue_head_offset, (tail + 1) % patch.queue_slots)
+end
+local calls_before = enqueue_calls
+native_request(3)
+assert(patch.observe(api, game))
+assert(enqueue_calls == calls_before + 1)
+local replay_tail = get_u32(director + patch.queue_tail_offset)
+local replayed = director + patch.queue_base_offset + ((replay_tail + patch.queue_slots - 1) % patch.queue_slots) * patch.queue_stride
+assert(get_u32(replayed + patch.queue_type_offset) == 3)
+assert(api.pointer(api.read(replayed + patch.queue_descriptor_offset, 8)) == descriptor)
+assert(patch.observe(api, game) and enqueue_calls == calls_before + 1)
+native_request(1)
+assert(patch.observe(api, game) and enqueue_calls == calls_before + 2)
+native_request(4)
+assert(patch.observe(api, game) and enqueue_calls == calls_before + 2)
+pass('per-frame tail observer replays Encounter and Patrol once without recursive copies')
 
 director_present = false
 assert(patch.apply(api, game))
@@ -644,4 +696,4 @@ assert_config(2, 4, 0.8, 1.4, 100, 60)
 assert(patch.detail:find('d=60', 1, true))
 pass('desired target remains native to avoid amplifying the combined-100 rejection gate')
 
-print(count .. ' data-only spawn multiplier checks passed; no executable code was modified.')
+print(count .. ' spawn multiplier checks passed; no executable code was modified.')

@@ -1,17 +1,17 @@
-Enemy Spawn Multiplier 6x - v16 variants
+Enemy Spawn Multiplier 6x - v17 variants
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
-- Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
-- Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
+- Enemy-Spawn-Multiplier-6x-Native-Composition-v17.zip
+- Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v17.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. Loader v15 discovers this mod from its
 declared addon entry; no loader registry edit or custom fork is required. Both
 variants use the same resource ID and cannot be combined.
 
-v16 keeps the Encounter budget override at 6x, raises nonzero per-type caps and
+v17 keeps the Encounter budget override at 6x, raises nonzero per-type caps and
 the group clamp to 10x, and divides Patrol/Straggler intervals by 10. Typical
 20-40 second Straggler intervals become 2-4 seconds, 8-14 second Patrol
 intervals become 0.8-1.4 seconds, and a group clamp of 10 becomes 100.
@@ -25,29 +25,34 @@ failed Patrol position query without repeatedly dividing the timer.
 The desired target at cfg+0x50 remains native. v13 doubled this value, but the
 same value participates in the native combined-100 rejection formula and could
 reduce spawning in some population states. Pending queue quantities, population
-counters and executable code remain unchanged.
+counters and executable code remain unchanged. Every approved Encounter or
+Patrol queue request is re-enqueued once through the game's native queue
+function, for two scheduled requests in total.
 
 The Light-Medium Bias variant ranks supported Encounter templates by cost per
 planned unit. If a faction exposes an incompatible template layout, such as the
-currently observed Automaton pool, v16 keeps native weights and continues the
+currently observed Automaton pool, v17 keeps native weights and continues the
 core budget, cap and interval tuning instead of stopping midway.
 
-Illuminate missions are identified by their 42-row faction cap table. Their
+Illuminate missions are identified by their observed 45-row faction cap table. Their
 GuardForce budget is reduced to one quarter during initialization so static
 defenders leave room under the shared native population gate. Existing entities
 and live population counters are never rewritten.
 
 After a mission starts, inspect %LOCALAPPDATA%/EnemySpawnMultiplier.log.
-data-v16-native or data-v16-light-medium plus spawn_multiplier_ready means the
+native-queue-v17-native or native-queue-v17-light-medium plus
+spawn_multiplier_ready means the
 active config was resolved. Expected values for the common 20-40 / 8-14 / 10
 config are i=2.00-4.00/0.80-1.40 g=100. f= identifies the faction from its cap
 table, gf= shows current/original GuardForce budget, and w= reports bias status.
-t= reports shortened deadlines. cfg= shows the selected config source. l=vanilla
-confirms the native population branches were not patched.
+t= reports shortened deadlines. cfg= shows the selected config source. q= shows
+replayed/observed eligible requests. l=vanilla confirms the native population
+branches were not patched.
 
 The native 70/448 population gates, position queries and queue processing still
-apply. v16 improves effective density through higher data caps, larger allowed
-groups and shorter scheduling delays; it does not remove executable-code gates.
+apply to original requests. v17 also duplicates each already-approved
+Encounter and Patrol request through the native queue without patching those
+executable-code gates.
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy
 the remaining mods.

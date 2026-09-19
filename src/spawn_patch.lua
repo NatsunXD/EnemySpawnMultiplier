@@ -17,10 +17,24 @@ local patch = {
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
     illuminate_guardforce_multiplier = 0.25,
-    faction_cap_counts = {automaton = 48, terminid = 44, illuminate = 42},
+    faction_cap_counts = {automaton = 61, terminid = 44, illuminate = 45},
     cap_multiplier = 10,
     interval_divisor = 10,
     group_multiplier = 10,
+    queue_replay_copies = 1,
+    queue_replay_types = {[1] = true, [3] = true}, -- Patrol and Encounter
+    queue_counter_offset = 0x36C0,
+    queue_tail_offset = 0x36C4,
+    queue_head_offset = 0x36C8,
+    queue_base_offset = 0x36D0,
+    queue_slots = 96,
+    queue_stride = 0x908,
+    queue_transform_offset = 0x8A0,
+    queue_descriptor_offset = 0x8E0,
+    queue_position_offset = 0x8E8,
+    queue_type_offset = 0x8F4,
+    queue_quantity_offset = 0x900,
+    queue_flag_offset = 0x904,
     director_rva = 0x276CA20,
     mode_rva = 0x276c3d0,
     time_rva = 0x276C068,
@@ -69,7 +83,9 @@ local override_state = {}
 local mission = {
     director = nil, key = nil, points_original = nil, points_applied = nil,
     guardforce_original = nil, guardforce_applied = nil,
-    cfg = nil, weights = nil,
+    cfg = nil, weights = nil, ready = false, queue_tail = nil,
+    queue_enqueue = nil, queue_seen = 0, queue_replayed = 0,
+    queue_skipped = 0, queue_reason = nil,
 }
 patch.detail = ''
 
@@ -123,6 +139,9 @@ local function reset()
     mission.points_original, mission.points_applied = nil, nil
     mission.guardforce_original, mission.guardforce_applied = nil, nil
     mission.cfg, mission.weights = nil, nil
+    mission.ready, mission.queue_tail, mission.queue_enqueue = false, nil, nil
+    mission.queue_seen, mission.queue_replayed, mission.queue_skipped = 0, 0, 0
+    mission.queue_reason = nil
 end
 local function same_pointer(api, first, second)
     return first and second and api.distance(first, second) == 0
@@ -562,6 +581,112 @@ local function scale_config(api, game, director)
     return scaled, first, source .. '@' .. tostring(address)
 end
 
+local function queue_indices(api, director)
+    local bytes = api.read(director + patch.queue_counter_offset, 12)
+    if not bytes then return nil end
+    local tail, head = u32(bytes, 4), u32(bytes, 8)
+    if tail >= patch.queue_slots or head >= patch.queue_slots then return nil end
+    return tail, head, u32(bytes, 0)
+end
+
+local function next_queue_slot(index)
+    index = index + 1
+    if index == patch.queue_slots then return 0 end
+    return index
+end
+
+function patch.observe(api, game)
+    if not mission.ready or not mission.director then return true end
+    local director = api.pointer(api.read(game + patch.director_rva, 8))
+    if not same_pointer(api, director, mission.director) then
+        mission.ready, mission.queue_tail, mission.queue_enqueue = false, nil, nil
+        return true
+    end
+    local tail = queue_indices(api, director)
+    if not tail then
+        mission.queue_reason = 'queue_indices_invalid'
+        return true
+    end
+    if mission.queue_tail == nil then
+        mission.queue_tail = tail
+        return true
+    end
+    if mission.queue_tail == tail then return true end
+
+    local records, cursor, walked = {}, mission.queue_tail, 0
+    while cursor ~= tail and walked < patch.queue_slots - 1 do
+        local slot = director + patch.queue_base_offset + cursor * patch.queue_stride
+        local payload = api.read(slot, patch.queue_stride)
+        if payload then
+            local kind = u32(payload, patch.queue_type_offset)
+            local quantity = u32(payload, patch.queue_quantity_offset)
+            local descriptor = api.pointer(payload, patch.queue_descriptor_offset)
+            if patch.queue_replay_types[kind] and descriptor and quantity > 0 and quantity <= 8192 then
+                local descriptor_bytes = api.read(descriptor, 0x18)
+                local template = descriptor_bytes and api.pointer(descriptor_bytes, 0)
+                if template and api.writable_data(descriptor + 0x10, 3) then
+                    ffi = ffi or require('ffi')
+                    local copy = ffi.new('uint8_t[?]', patch.queue_stride)
+                    ffi.copy(copy, payload, patch.queue_stride)
+                    records[#records + 1] = {
+                        payload = copy, descriptor = descriptor, kind = kind,
+                        flag = payload:byte(patch.queue_flag_offset + 1),
+                    }
+                else
+                    mission.queue_skipped = mission.queue_skipped + 1
+                end
+            end
+        else
+            mission.queue_skipped = mission.queue_skipped + 1
+        end
+        cursor, walked = next_queue_slot(cursor), walked + 1
+    end
+    mission.queue_tail = tail
+    if cursor ~= tail then
+        mission.queue_reason = 'queue_tail_advanced_too_far'
+        return true
+    end
+    mission.queue_seen = mission.queue_seen + #records
+    if #records == 0 then return true end
+    if not mission.queue_enqueue then
+        mission.queue_enqueue = api.bind_spawn_enqueue(game)
+        if not mission.queue_enqueue then
+            mission.queue_reason = 'queue_enqueue_signature_mismatch'
+            return true
+        end
+    end
+
+    for _, record in ipairs(records) do
+        for _ = 1, patch.queue_replay_copies do
+            local current_tail, current_head = queue_indices(api, director)
+            if not current_tail then
+                mission.queue_reason = 'queue_changed_before_replay'
+                return true
+            end
+            local expected = next_queue_slot(current_tail)
+            if expected == current_head then
+                mission.queue_skipped = mission.queue_skipped + 1
+                mission.queue_reason = 'queue_full'
+                mission.queue_tail = current_tail
+                return true
+            end
+            mission.queue_enqueue(director, record.descriptor, record.flag,
+                record.payload + patch.queue_transform_offset, record.kind,
+                record.payload + patch.queue_position_offset, record.payload, 0)
+            local advanced = queue_indices(api, director)
+            if advanced ~= expected then
+                mission.queue_reason = 'queue_enqueue_did_not_advance'
+                mission.queue_tail = advanced or current_tail
+                return true
+            end
+            mission.queue_replayed = mission.queue_replayed + 1
+            mission.queue_tail = advanced
+        end
+    end
+    mission.queue_reason = nil
+    return true
+end
+
 function patch.apply(api, game)
     if not in_mission(api, game) then
         reset()
@@ -613,6 +738,9 @@ function patch.apply(api, game)
         mission.points_original, mission.points_applied = nil, nil
         mission.guardforce_original, mission.guardforce_applied = nil, nil
         mission.cfg, mission.weights = nil, nil
+        mission.ready, mission.queue_tail, mission.queue_enqueue = false, nil, nil
+        mission.queue_seen, mission.queue_replayed, mission.queue_skipped = 0, 0, 0
+        mission.queue_reason = nil
     end
     local points_bytes = api.read(director + patch.points_offset, 8)
     if not points_bytes then return false, 'spawn_points_unreadable', false end
@@ -696,7 +824,12 @@ function patch.apply(api, game)
     patch.detail = patch.detail .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
         .. (bias_reason and (':' .. bias_reason) or '')
         .. ' cfg=' .. tostring(cfg_reason)
+        .. ' q=' .. tostring(mission.queue_replayed) .. '/' .. tostring(mission.queue_seen)
+        .. (mission.queue_skipped > 0 and ('+' .. tostring(mission.queue_skipped)) or '')
+        .. (mission.queue_reason and (':' .. mission.queue_reason) or '')
+        .. (patch.observer_error and ':queue_observer_exception' or '')
     if configs > 0 then
+        mission.ready = true
         return true, 'spawn_multiplier_ready', true
     end
     if mission.points_applied or #pending > 0 or points > 0 or valid > 0 then

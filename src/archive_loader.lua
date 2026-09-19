@@ -39,6 +39,11 @@ return function(create_api, patch, build)
         report(tostring(reason), active == true)
     end
     local function forward(dt, ...)
+        if not stopped and type(patch.observe) == 'function' then
+            local observed, reason = pcall(patch.observe, api, game)
+            if observed then patch.observer_error = nil
+            else patch.observer_error = tostring(reason) end
+        end
         check(dt)
         return ...
     end
