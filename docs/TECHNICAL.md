@@ -12,6 +12,15 @@ change executable pages or import `VirtualProtect` or
 are copied to private writable allocations before their owning pointer is
 retargeted. Every supported executable and `game.dll` is hash checked first.
 
+The reverted v17 experiment called the internal enqueue function at
+`game.dll+0x948FA0` with a reconstructed descriptor and payload. A matching
+function prologue verified only the entry address; it did not prove the complete
+argument layout or ownership rules. Runtime testing produced frequent crashes,
+so native spawn/enqueue/consume calls, manual queue-item copies, queue-index
+writes, and live-counter writes are outside the supported boundary. Future
+experiments must remain read-only until a complete writable private-data layout
+is validated across all three factions.
+
 The object referenced by `director+0x660` is `0xB0` bytes, although its first
 `0x10` bytes are enough to locate the cap rows. Native function `0x93F0E0`
 copies and consumes the complete object. v16 therefore preserves all `0xB0`
