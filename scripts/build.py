@@ -117,7 +117,7 @@ def main():
             'template_bias_quantiles': {'light_max': 0.5, 'medium_max': 0.8},
             'template_weight_multipliers': {'light': 3.6, 'medium': 1.25, 'heavy': 0.25},
             'template_bias_unsupported_layout': 'native_weight_fallback',
-            'faction_cap_counts': {'automaton': 48, 'terminid': 44, 'illuminate': 42},
+            'faction_cap_counts': {'automaton': 61, 'terminid': 44, 'illuminate': 45},
             'illuminate_guardforce_multiplier': 0.25,
             'entry_stride': '0x80', 'max_offset': '0x18',
             'budget_multiplier': 6, 'cap_multiplier': 10,

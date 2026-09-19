@@ -100,16 +100,18 @@ Native Composition leaves candidate weights unchanged. Light-Medium Bias reads
 the active Encounter candidate pool, computes template cost per planned unit,
 and ranks it within the current faction and difficulty. The lowest 50% receives
 `3.6x` weight, the next 30% receives `1.25x`, and the highest 20% receives
-`0.25x`. Baselines are retained so repeated checks do not stack multipliers.
+`0.25x`. Candidate rows are read inline at `candidate+0`; `candidate+0xA8` is
+only validated as the source-definition pointer and is never changed. Baselines
+are retained so repeated checks do not stack multipliers.
 
-Faction cap-table cardinality identifies the active roster: Automaton 48,
-Terminid 44, and Illuminate 42. Candidate structures are not identical across
+Faction cap-table cardinality identifies the active roster on the supported build:
+Automaton 61, Terminid 44, and Illuminate 45. Candidate structures are not identical across
 all three factions. If the optional bias reader sees an unsupported layout, it
 logs the reason, leaves weights native, and continues the core tuning. This
 prevents the earlier Automaton path from stopping after budget/cap writes but
 before config and timer changes.
 
-Illuminate's 42-row table also gates a `0.25x` GuardForce budget adjustment.
+Illuminate's 45-row table also gates a `0.25x` GuardForce budget adjustment.
 The write occurs at the budget source during initialization; no live type count,
 queue entry, or existing unit is modified. Reducing static defenders creates
 headroom under the unchanged shared population checks.

@@ -263,9 +263,9 @@ local function fill_candidate(index, weight, cost, units)
     local candidate = director + patch.candidate_pool_offset + index * patch.candidate_stride
     local template = bias_templates + index * 0x100
     ffi.fill(template, 0x100, 0)
-    put_u32(template, index + 1)
-    put_u32(template + 4, units)
-    put_u32(template + 0x60, 1)
+    put_u32(candidate, index + 1)
+    put_u32(candidate + 4, units)
+    put_u32(candidate + 0x60, 1)
     put_ptr(candidate + patch.candidate_template_offset, template)
     put_f32(candidate + patch.candidate_weight_offset, weight)
     put_f32(candidate + patch.candidate_cost_offset, cost)
@@ -335,12 +335,12 @@ pass('template cost per unit biases light and medium candidates without stacking
 
 director_present = false
 assert(patch.apply(api, game))
-mission(faction_caps(48, 1000), 100, 50)
+mission(faction_caps(61, 1000), 100, 50)
 fill_config(20, 40, 8, 14, 10, 30)
 patch.template_bias_enabled = true
 put_u32(director + patch.candidate_count_offset, 1)
 fill_candidate(0, 1, 20, 10)
-put_u32(bias_templates + 0x60, 0)
+put_u32(director + patch.candidate_pool_offset + 0x60, 0)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
 assert_config(2, 4, 0.8, 1.4, 100, 30)
@@ -354,7 +354,7 @@ pass('unsupported Automaton template layout falls back to native weights without
 
 director_present = false
 assert(patch.apply(api, game))
-mission(faction_caps(42, 2000), 100, 600)
+mission(faction_caps(45, 2000), 100, 600)
 fill_config(20, 40, 8, 14, 10, 30)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')

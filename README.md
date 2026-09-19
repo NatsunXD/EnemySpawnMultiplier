@@ -46,7 +46,7 @@
 <details>
 <summary>English</summary>
 
-v16 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages. Native Composition preserves native Encounter template weights. Light-Medium Bias ranks supported candidate pools by cost per planned unit and falls back to native weights when a faction uses an incompatible template layout.
+v16 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages. Native Composition preserves native Encounter template weights. Light-Medium Bias ranks supported Encounter candidates by cost per planned unit using their inline composition rows and falls back to native weights when a faction uses an incompatible layout.
 
 Both variants use the native Encounter budget override at `6x`, scale nonzero per-type caps and the group clamp to `10x`, and divide Patrol/Straggler intervals by `10`. Future deadlines longer than the new maximum interval are clamped so the initial native delay and failed-position-query backoff do not hide the faster configuration. The desired target stays native because scaling it can make the native combined-100 rejection fire more often.
 

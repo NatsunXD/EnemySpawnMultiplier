@@ -27,12 +27,12 @@ same value participates in the native combined-100 rejection formula and could
 reduce spawning in some population states. Pending queue quantities, population
 counters and executable code remain unchanged.
 
-The Light-Medium Bias variant ranks supported Encounter templates by cost per
-planned unit. If a faction exposes an incompatible template layout, such as the
-currently observed Automaton pool, v16 keeps native weights and continues the
+The Light-Medium Bias variant ranks supported Encounter candidates by cost per
+planned unit using their inline composition rows. If a faction exposes an
+incompatible layout, v16 keeps native weights and continues the
 core budget, cap and interval tuning instead of stopping midway.
 
-Illuminate missions are identified by their 42-row faction cap table. Their
+Illuminate missions are identified by their 45-row faction cap table. Their
 GuardForce budget is reduced to one quarter during initialization so static
 defenders leave room under the shared native population gate. Existing entities
 and live population counters are never rewritten.

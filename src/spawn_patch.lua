@@ -17,7 +17,8 @@ local patch = {
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
     illuminate_guardforce_multiplier = 0.25,
-    faction_cap_counts = {automaton = 48, terminid = 44, illuminate = 42},
+    -- Raw cap-table counts observed on the supported 1.8.45317.0 build.
+    faction_cap_counts = {automaton = 61, terminid = 44, illuminate = 45},
     cap_multiplier = 10,
     interval_divisor = 10,
     group_multiplier = 10,
@@ -30,7 +31,7 @@ local patch = {
     candidate_pool_offset = 0x432F8,
     candidate_count_offset = 0x5188C,
     candidate_stride = 0xD8,
-    candidate_template_offset = 0xA8,
+    candidate_template_offset = 0xA8, -- source definition pointer; rows are inline at +0
     candidate_weight_offset = 0xC0,
     candidate_cost_offset = 0xD4,
     candidate_max = 256,
@@ -277,28 +278,27 @@ local function scale_candidate_weights(api, director)
     local candidates, densities = {}, {}
     for index = 0, count - 1 do
         local address = base + index * patch.candidate_stride
-        local bytes = api.read(address + patch.candidate_template_offset,
-            patch.candidate_cost_offset - patch.candidate_template_offset + 4)
+        local bytes = api.read(address, patch.candidate_stride)
         if not bytes then return 0, count, 'spawn_candidate_unreadable' end
-        local template = api.pointer(bytes, 0)
-        local weight = number(bytes, patch.candidate_weight_offset - patch.candidate_template_offset)
-        local cost = number(bytes, patch.candidate_cost_offset - patch.candidate_template_offset)
-        if not template or not finite(weight) or not finite(cost)
+        local source = api.pointer(bytes, patch.candidate_template_offset)
+        local weight = number(bytes, patch.candidate_weight_offset)
+        local cost = number(bytes, patch.candidate_cost_offset)
+        if not source or not finite(weight) or not finite(cost)
             or weight < 0 or weight > 1000000 or cost <= 0 or cost > 1000000 then
             return 0, count, 'spawn_candidate_layout_mismatch'
         end
-        local template_bytes = api.read(template, 0x64)
-        if not template_bytes then return 0, count, 'spawn_candidate_template_unreadable' end
-        local rows = u32(template_bytes, 0x60)
+        local rows = u32(bytes, 0x60)
         if rows < 1 or rows > 8 then return 0, count, 'spawn_candidate_template_layout_mismatch' end
         local units = 0
         for row = 0, rows - 1 do
-            local quantity = u32(template_bytes, row * 12 + 4)
+            local type_id = u32(bytes, row * 12)
+            local quantity = u32(bytes, row * 12 + 4)
+            if type_id == 0 then return 0, count, 'spawn_candidate_type_mismatch' end
             if quantity > 1024 then return 0, count, 'spawn_candidate_quantity_mismatch' end
             units = units + quantity
         end
         if units < 1 or units > 8192 then return 0, count, 'spawn_candidate_quantity_mismatch' end
-        local key = tostring(index) .. ':' .. tostring(template) .. ':' .. string.format('%.3f', cost)
+        local key = tostring(index) .. ':' .. tostring(source) .. ':' .. string.format('%.3f', cost)
         local state = mission.weights[key]
         if not state then
             state = {baseline = weight, applied = nil}
