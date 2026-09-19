@@ -36,8 +36,8 @@ def main():
             assert zlib.crc32(png[offset + 4:end]) == int.from_bytes(png[end:end + 4], 'big')
             offset = end + 4
         assert offset == len(png)
-        assert provenance['revision'] in ('data-v13-native', 'data-v13-light-medium')
-        assert provenance['display_version'] == 'v13' and provenance['runtime_verified'] is False
+        assert provenance['revision'] in ('data-v14-native', 'data-v14-light-medium')
+        assert provenance['display_version'] == 'v14' and provenance['runtime_verified'] is False
         assert provenance['requires'] == [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977', 'api': 1}]
         for name, digest in provenance['files'].items():
             assert hashlib.sha256(payloads[name]).hexdigest().upper() == digest

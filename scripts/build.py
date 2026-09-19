@@ -1,4 +1,4 @@
-"""Build and verify Enemy Spawn Multiplier 5x without launching the game."""
+"""Build and verify Enemy Spawn Multiplier 6x without launching the game."""
 import json
 import os
 from pathlib import Path
@@ -19,15 +19,15 @@ BUILD = ROOT / 'build'
 RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
 VARIANTS = {
     'base': {
-        'revision': 'data-v13-native',
+        'revision': 'data-v14-native',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
-        'description': 'Uses the native encounter budget override path at 6x, scales the encounter target to 2x with a 95 cap, keeps nonzero per-type caps and the group clamp at 5x, and shortens Patrol/Straggler intervals to one fifth. Native template weights, population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
+        'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and clamps already scheduled timers to the new maximum interval. Native template weights, population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
         'template_bias': False,
     },
     'light-medium': {
-        'revision': 'data-v13-light-medium',
+        'revision': 'data-v14-light-medium',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
-        'description': 'Uses the v13 data-only spawn multipliers and favors Encounter templates with lower cost per unit. The light half receives 3.6x weight, the middle 30 percent receives 1.25x, and the heaviest 20 percent receives 0.25x. Native population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
+        'description': 'Uses the v14 data-only spawn multipliers and favors Encounter templates with lower cost per unit. The light half receives 3.6x weight, the middle 30 percent receives 1.25x, and the heaviest 20 percent receives 0.25x. Native population gates and executable code remain unchanged. Requires Bingus Shared Loader.',
         'template_bias': True,
     },
 }
@@ -91,7 +91,7 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 13,
+        'version': 14,
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],
         'game_exe_sha256': EXE_SHA, 'game_dll_sha256': GAME_DLL_SHA,
@@ -109,17 +109,17 @@ def main():
             'resource_table_clone': True,
             'cfg_base_offset': '0x519A4', 'cfg_stride': '0x438',
             'interval_offsets': ['0x38', '0x3c', '0x40', '0x44'], 'group_clamp_offset': '0x48',
-            'desired_offset': '0x50', 'desired_write': True, 'desired_multiplier': 2, 'desired_cap': 95,
+            'desired_offset': '0x50', 'desired_write': False,
             'budget_override_offset': '0x78', 'budget_override_multiplier': 6,
             'template_bias': 'relative_cost_per_unit' if variant['template_bias'] else 'native',
             'template_bias_quantiles': {'light_max': 0.5, 'medium_max': 0.8},
             'template_weight_multipliers': {'light': 3.6, 'medium': 1.25, 'heavy': 0.25},
             'entry_stride': '0x80', 'max_offset': '0x18',
-            'budget_multiplier': 6, 'cap_multiplier': 5,
-            'interval_divisor': 5, 'group_multiplier': 5,
+            'budget_multiplier': 6, 'cap_multiplier': 10,
+            'interval_divisor': 10, 'group_multiplier': 10,
             'mission_reset_check_seconds': 0.1, 'guardforce_changed': False,
             'live_counter_writes': False, 'pending_queue_writes': False,
-            'native_timestamp_writes': False, 'runtime_verified': False,
+            'native_timestamp_writes': 'future_deadline_clamp_only', 'runtime_verified': False,
             'native_code_patches': [],
         },
         'continuous_update_hook': True, 'shutdown_hook': False, 'executable_code_writes': 0,

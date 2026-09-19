@@ -2,53 +2,45 @@
 
 ## 中文说明
 
-v13 适用于 Steam build `24826606` / EXE `1.8.45317.0`，提供两个可选版本：
+v14 适用于 Steam build `24826606` / EXE `1.8.45317.0`，提供两个互斥版本：
 
-- `Native Composition`：保留游戏原本的敌人模板权重。
-- `Light-Medium Bias`：偏向单位平均点数较低的模板。
+- `Native Composition`：保留游戏原本的 Encounter 模板权重。
+- `Light-Medium Bias`：偏向单位平均点数较低的模板。较轻的 50% 为 `3.6x`，中间 30% 为 `1.25x`，较重的 20% 为 `0.25x`。
 
-两个版本使用相同资源 ID，只能选择其中一个安装。
+两个版本的刷怪强度相同，并使用同一个资源 ID，只能安装其中一个。
 
-### 改动
+### v14 刷怪调整
 
-- 增援预算覆盖值为当前缩放预算的 6 倍。
-- 所有非零单类刷怪上限改为原来的 5 倍。
-- 巡逻队和 Straggler 时间间隔改为原本的 1/5，最低保留 0.2 秒。
-- 巡逻队的组数量限制改为原来的 5 倍。
-- Encounter 期望数量改为原来的 2 倍，最高 95。
-- 轻中甲版按“模板点数 / 计划单位数”排序：较轻的 50% 权重 3.6 倍，中间 30% 权重 1.25 倍，较重的 20% 权重 0.25 倍。
+- Encounter 预算覆盖值为当前基础预算的 `6x`。
+- 所有非零单类刷怪上限改为原来的 `10x`。
+- Patrol 和 Straggler 的配置间隔缩短到 `1/10`，最低 `0.1` 秒。
+- 组数量限制提高到原来的 `10x`。
+- 已排定的 Patrol/Straggler 计时如果仍长于新配置的最大间隔，会被截短到新的最大值。这使首轮刷新和位置查询失败后的退避也能及时采用新速度。
+- `cfg+0x50` 目标值保持原生。v13 的 `2x` 会增大 `combined-100` 算式，在部分人口构成下反而阻止刷新。
 
-模组只修改私有可写数据，不修改游戏代码页。原生人口门槛、出生点检查、模板可用性和生成队列仍然生效。轻中甲分类采用单位平均点数，是跨阵营的相对偏向，不是硬编码装甲标签。
+模组只修改私有可写数据，不修改游戏代码页。原生 70/448 人口门槛、位置查询、模板可用性和生成队列仍会限制最终数量。v14 通过扩大数据上限、增大单次组上限和持续截短过长 CD 来提高实际触发稳定性，但不会伪装成已移除原生硬门槛。
 
 ### 安装
 
 1. 关闭游戏。
-2. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v13.zip` 或 `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v13.zip`，二选一。
-3. 启用已经加入本模块注册项的 [BingusSharedLoader](https://github.com/NatsunXD/BingusSharedLoader)。
-4. 删除旧版 Enemy Spawn Multiplier 条目，重新部署。
-5. 重启游戏后再测试，避免沿用旧进程中的内存修改。
+2. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v14.zip` 或 `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v14.zip`，二选一。
+3. 启用已注册本模块的 [BingusSharedLoader](https://github.com/NatsunXD/BingusSharedLoader)。
+4. 删除旧版 Enemy Spawn Multiplier 条目，重新部署并重启游戏。
 
-两个版本均通过 21 项数据和内存行为测试，以及 6 项归档和打包测试。实战结果仍会受难度、种族、地图和多人房间影响。
+两个版本均通过合成内存行为测试和发布包检查。实战数量仍会受到阵营、难度、地图、出生位置和原生人口门槛影响。
 
 [技术说明](docs/TECHNICAL.md) | [构建说明](CONTRIBUTING.md) | [安装说明](INSTALL.txt)
 
 <details>
 <summary>English</summary>
 
-v13 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages:
+v14 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages. Native Composition preserves native Encounter template weights. Light-Medium Bias ranks the current candidate pool by cost per planned unit and applies `3.6x`, `1.25x`, and `0.25x` selection weights to the lightest 50%, middle 30%, and heaviest 20%.
 
-- `Native Composition` keeps native Encounter template weights.
-- `Light-Medium Bias` favors templates with lower cost per planned unit.
+Both variants use the native Encounter budget override at `6x`, scale nonzero per-type caps and the group clamp to `10x`, and divide Patrol/Straggler intervals by `10`. Future deadlines longer than the new maximum interval are clamped so the initial native delay and failed-position-query backoff do not hide the faster configuration. The desired target stays native because scaling it can make the native combined-100 rejection fire more often.
 
-Both variants use the native positive Encounter budget override at 6x, scale non-zero per-type caps and the Patrol group clamp by 5x, divide Patrol and Straggler intervals by 5, and scale the Encounter desired target by 2x with a cap of 95.
+The mod changes writable private data only and does not modify executable pages. Native population gates, position checks, template availability, and queue processing remain active.
 
-The biased variant ranks the current faction and difficulty candidate pool by cost per planned unit. The lower 50% receives a 3.6x weight, the middle 30% receives 1.25x, and the highest-cost 20% receives 0.25x. This is a relative cross-faction preference rather than an armor-tag lookup.
-
-The mod changes writable private data only. It does not modify executable pages. Native population gates, spawn-position checks, template availability, and queue processing remain active.
-
-Install either `Enemy-Spawn-Multiplier-6x-Native-Composition-v13.zip` or `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v13.zip` with [NatsunXD BingusSharedLoader](https://github.com/NatsunXD/BingusSharedLoader), then remove older Enemy Spawn Multiplier entries, deploy, and restart the game.
-
-Both variants pass 21 data and memory behavior checks plus 6 archive and package checks.
+Install either `Enemy-Spawn-Multiplier-6x-Native-Composition-v14.zip` or `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v14.zip` with [NatsunXD BingusSharedLoader](https://github.com/NatsunXD/BingusSharedLoader), remove older Enemy Spawn Multiplier entries, deploy, and restart the game.
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 

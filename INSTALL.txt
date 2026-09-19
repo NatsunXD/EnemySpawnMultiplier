@@ -1,61 +1,45 @@
-Enemy Spawn Multiplier 6x - maintained variants
+Enemy Spawn Multiplier 6x - v14 variants
 
-Close the game before upgrading. Replace previous Enemy Spawn Multiplier
-entries with exactly one package: Enemy-Spawn-Multiplier-6x-Native-Composition-v13.zip
-for native composition, or Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v13.zip
-for lower-cost-per-unit template bias.
-Keep Bingus-Shared-Loader-v12.zip enabled, then deploy both using HDArsenal
-or HD2MM. Use one manager. Restart the game to discard previous memory edits.
-The existing mod resource identity and GUID are unchanged. Choose one package
-only: both are v13; Native Composition keeps the native template mix, while
-Light-Medium Bias favors light and medium
-groups while retaining the same spawn multipliers.
+Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
+and install exactly one package:
 
-This build scales the Encounter base composition budget by 6 and nonzero
-per-type caps by 5. It resolves the active config through the director hash table
-or native resource-key fallback. A read-only resource table is cloned to
-private writable memory and retargeted before editing. It then shortens Patrol/Straggler intervals to
-one fifth (minimum 0.2s), and multiplies their group clamp by 5.
-Example: Straggler 20-40s -> 4-8s, Patrol 8-14s -> 1.6-2.8s,
-group clamp 10 -> 50. The group clamp is an upper limit, not a fixed count.
+- Enemy-Spawn-Multiplier-6x-Native-Composition-v14.zip
+- Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v14.zip
 
-This build never changes executable memory and does not import executable-page
-protection or instruction-cache APIs. It uses the native budget override field
-at cfg+0x78, scales the encounter target to 2x with a cap of 95, and leaves
-the native 70, 448, desired-reached and combined-100 population exits at their
-vanilla behavior. Only writable private data
-is changed. Native timestamps, ProducedFighter counters,
-pending queue quantities and director+0x36C0 remain read-only.
-Actual spawn totals still depend on demand, population limits, templates
-and spawn-location queries; offline tests do not establish a 5x live count.
+Keep Bingus Shared Loader enabled, deploy with HDArsenal or HD2MM, and restart
+the game. Both variants use the same resource ID and cannot be combined.
 
-For each active Encounter candidate pool, the biased v13 ranks template cost
-divided by planned unit count. The lower half receives 3.6x selection weight,
-the next 30% receives 1.25x, and the highest-cost 20% receives 0.25x. This is a relative
-three-faction policy, not a hard-coded enemy type list.
+v14 keeps the Encounter budget override at 6x, raises nonzero per-type caps and
+the group clamp to 10x, and divides Patrol/Straggler intervals by 10. Typical
+20-40 second Straggler intervals become 2-4 seconds, 8-14 second Patrol
+intervals become 0.8-1.4 seconds, and a group clamp of 10 becomes 100.
 
-The base release is data-v13-native and the biased release is
-data-v13-light-medium, both displayed as v13 and built for
-Steam build 24826606 / EXE 1.8.45317.0.
-Loader-v2 / API 1 or later with this mod resource registered is required.
+The module also checks the two pending Patrol/Straggler deadlines every 100 ms.
+A future deadline longer than its new maximum interval is shortened to that
+maximum. Deadlines already due or within the configured interval are untouched.
+This covers the initial native delay and the native 5-second retry delay after a
+failed Patrol position query without repeatedly dividing the timer.
 
-After a mission starts, check %LOCALAPPDATA%/EnemySpawnMultiplier.log:
-data-v13-native or data-v13-light-medium + spawn_multiplier_ready means the
-active data config and native
-budget override were scaled.
-spawn_multiplier_partial means only budget/caps applied; cfg= gives the
-config failure reason and checks continue. i=, g= and d= should be nonzero
-for a valid active config. cfg=director:... or cfg=resource:... shows its
-source/address. d= is the scaled desired target; l=vanilla confirms the
-native population exits were not patched. w= is biased/available candidate
-weights. t=0 is expected; x= is the native
-ProducedFighter count.
+The desired target at cfg+0x50 remains native. v13 doubled this value, but the
+same value participates in the native combined-100 rejection formula and could
+reduce spawning in some population states. Pending queue quantities, population
+counters and executable code remain unchanged.
 
-For a comparison, use the same mission type/difficulty and host role.
-Check Patrol and Encounter behavior separately. Record the three log lines,
-elapsed time, approximate units per event and any prolonged spawn pauses.
+The Light-Medium Bias variant ranks Encounter templates by cost per planned
+unit. The lightest 50% receives 3.6x selection weight, the middle 30% receives
+1.25x, and the heaviest 20% receives 0.25x. Native Composition leaves those
+weights unchanged.
 
-To uninstall: close the game, disable this mod, purge deployment, and
-redeploy the remaining mods.
+After a mission starts, inspect %LOCALAPPDATA%/EnemySpawnMultiplier.log.
+data-v14-native or data-v14-light-medium plus spawn_multiplier_ready means the
+active config was resolved. Expected values for the common 20-40 / 8-14 / 10
+config are i=2.00-4.00/0.80-1.40 g=100. t= reports how many overlong deadlines
+were shortened during the latest check. cfg= shows the selected config source.
+l=vanilla confirms the native population branches were not patched.
 
-Developed with assistance from GPT-6 Astra.
+The native 70/448 population gates, position queries and queue processing still
+apply. v14 improves effective density through higher data caps, larger allowed
+groups and shorter scheduling delays; it does not remove executable-code gates.
+
+To uninstall, close the game, disable this mod, purge deployment, and redeploy
+the remaining mods.

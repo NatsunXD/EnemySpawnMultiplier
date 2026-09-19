@@ -1,25 +1,23 @@
--- Raises the HiveMind encounter budget to 6x while retaining the proven 5x
--- cap/group and 5x faster patrol/straggler interval configuration. Live spawn
+-- Raises the HiveMind encounter budget to 6x, expands data-driven caps/group
+-- clamps to 10x and shortens patrol/straggler intervals to one tenth. Live spawn
 -- frequency and per-wave group clamp come from the native
 -- handle/hash resolver for the 0x438 config at director+0x519A4, not from
 -- encounter points. Encounter points are a per-reinforcement composition
 -- budget; they are not a remaining pool and do not control how often waves
 -- fire. Guardforce / static POI budgets stay vanilla. Zero per-type cap rows
--- are a native skip. Native patrol timestamps and population counters remain
--- read-only diagnostics so the director can own its timing and accounting.
+-- are a native skip. Population counters remain read-only. Existing Patrol and
+-- Straggler deadlines are only shortened when they exceed the scaled maximum.
 local ffi
 local patch = {
     budget_multiplier = 6,
     budget_override_multiplier = 6,
-    desired_multiplier = 2,
-    max_desired = 95,
     template_bias_enabled = false,
     template_bias_light = 3.6,
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
-    cap_multiplier = 5,
-    interval_divisor = 5,
-    group_multiplier = 5,
+    cap_multiplier = 10,
+    interval_divisor = 10,
+    group_multiplier = 10,
     director_rva = 0x276CA20,
     mode_rva = 0x276c3d0,
     time_rva = 0x276C068,
@@ -33,7 +31,8 @@ local patch = {
     candidate_cost_offset = 0xD4,
     candidate_max = 256,
     pop_offset = 0x620, -- native ProducedFighter count; read-only diagnostic
-    timer_offsets = {0x3A518, 0x3A520}, -- native timestamps; read-only
+    timer_offsets = {0x3A518, 0x3A520},
+    timer_units_per_second = 1000000,
     entry_stride = 0x80,
     max_offset = 0x18,
     min_count = 1,
@@ -53,7 +52,7 @@ local patch = {
     cfg_override_offset = 0x78,
     cfg_stride = 0x438,
     cfg_max = 8,
-    min_interval = 0.2,
+    min_interval = 0.1,
     max_interval = 600,
     min_group = 1,
     max_group = 64,
@@ -77,6 +76,18 @@ local function pack_u32(value)
     ffi = ffi or require('ffi')
     local buffer = ffi.new('uint32_t[1]', value)
     return ffi.string(buffer, 4)
+end
+local function u64(bytes, offset)
+    if not bytes or offset < 0 or offset + 8 > #bytes then return nil end
+    ffi = ffi or require('ffi')
+    local value = ffi.new('uint64_t[1]')
+    ffi.copy(value, bytes:sub(offset + 1, offset + 8), 8)
+    return tonumber(value[0])
+end
+local function pack_u64(value)
+    ffi = ffi or require('ffi')
+    local buffer = ffi.new('uint64_t[1]', value)
+    return ffi.string(buffer, 8)
 end
 local function pack_ptr(address)
     ffi = ffi or require('ffi')
@@ -329,6 +340,29 @@ local function write_interval(api, address, offset, current, target)
     return api.write(address + offset, pack_f32(target))
         and near(number(api.read(address + offset, 4) or '', 0), target)
 end
+local function clamp_timers(api, game, director, cfg)
+    if not cfg then return 0 end
+    local clock = api.pointer(api.read(game + patch.time_rva, 8))
+    if not clock then return 0 end
+    local now_bytes = api.read(clock + 0x18, 8)
+    local now = now_bytes and u64(now_bytes, 0)
+    if not now or now < 0 or now > 9000000000000000 then return 0 end
+    local maximums = {cfg.i3c, cfg.i44}
+    local changed = 0
+    for index, offset in ipairs(patch.timer_offsets) do
+        local bytes = api.read(director + offset, 8)
+        local pending = bytes and u64(bytes, 0)
+        local limit = now + math.floor(maximums[index] * patch.timer_units_per_second + 0.5)
+        if pending and pending > limit and api.writable_data(director + offset, 8) then
+            if not api.write(director + offset, pack_u64(limit))
+                or u64(api.read(director + offset, 8), 0) ~= limit then
+                return nil, 'spawn_timer_write_failed'
+            end
+            changed = changed + 1
+        end
+    end
+    return changed
+end
 local function resolve_resource_config(api, game, key)
     if key == string.rep('\0', 8) then return nil, 'spawn_config_resource_key_missing' end
     local manager = api.pointer(api.read(game + patch.resource_manager_rva, 8))
@@ -420,12 +454,6 @@ local function scale_config(api, game, director)
             baseline = copy_cfg(cfg)
         else
             local restored = math.floor(cfg.group / patch.group_multiplier + 0.5)
-            local restored_desired = cfg.desired
-            if cfg.desired % patch.desired_multiplier == 0
-                and cfg.desired / patch.desired_multiplier >= 1
-                and cfg.desired / patch.desired_multiplier <= patch.max_desired then
-                restored_desired = cfg.desired / patch.desired_multiplier
-            end
             if cfg.group % patch.group_multiplier == 0
                 and restored >= patch.min_group and restored <= patch.max_group then
                 baseline = {
@@ -434,7 +462,7 @@ local function scale_config(api, game, director)
                     i40 = cfg.i40 * patch.interval_divisor,
                     i44 = cfg.i44 * patch.interval_divisor,
                     group = restored,
-                    desired = restored_desired,
+                    desired = cfg.desired,
                     override = cfg.override,
                 }
             else
@@ -453,9 +481,6 @@ local function scale_config(api, game, director)
     if tgroup > patch.max_group * patch.group_multiplier then
         tgroup = patch.max_group * patch.group_multiplier
     end
-    local tdesired = math.floor(baseline.desired * patch.desired_multiplier + 0.5)
-    if tdesired < 1 then tdesired = 1 end
-    if tdesired > patch.max_desired then tdesired = patch.max_desired end
     if not write_interval(api, address, 0x38, cfg.i38, t38)
         or not write_interval(api, address, 0x3c, cfg.i3c, t3c)
         or not write_interval(api, address, 0x40, cfg.i40, t40)
@@ -466,12 +491,6 @@ local function scale_config(api, game, director)
         if not api.write(address + 0x48, pack_u32(tgroup))
             or u32(api.read(address + 0x48, 4) or '', 0) ~= tgroup then
             return nil, 'spawn_group_write_failed'
-        end
-    end
-    if cfg.desired ~= tdesired then
-        if not api.write(address + 0x50, pack_u32(tdesired))
-            or u32(api.read(address + 0x50, 4) or '', 0) ~= tdesired then
-            return nil, 'spawn_desired_write_failed'
         end
     end
     local override_target
@@ -502,7 +521,7 @@ local function scale_config(api, game, director)
     scaled = 1
     first = {
         i38 = t38, i3c = t3c, i40 = t40, i44 = t44,
-        group = tgroup, desired = tdesired,
+        group = tgroup, desired = baseline.desired,
     }
     return scaled, first, source .. '@' .. tostring(address)
 end
@@ -626,9 +645,11 @@ function patch.apply(api, game)
     if weighted == nil then return false, candidate_count, false end
     local configs, cfg_live, cfg_reason = scale_config(api, game, director)
     if configs == nil then return false, cfg_live, false end
+    local timers, timer_reason = clamp_timers(api, game, director, cfg_live)
+    if timers == nil then return false, timer_reason, false end
     local pop_live = read_pop(api, director)
     local scaled_points = mission.points_applied or points
-    describe(scaled_points, mission.points_original, valid, count, 0, pop_live, cfg_live)
+    describe(scaled_points, mission.points_original, valid, count, timers, pop_live, cfg_live)
     patch.detail = patch.detail .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
         .. ' cfg=' .. tostring(cfg_reason)
     if configs > 0 then
