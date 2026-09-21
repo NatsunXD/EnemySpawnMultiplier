@@ -5,7 +5,17 @@ import subprocess
 from archive import LUA, EXE_SHA, GAME_DLL_SHA, resource_hash
 
 
-def build_module(root, build, module_name, patch_name, revision, template_bias=False):
+def lua_literal(value):
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, str):
+        return "'" + value.replace('\\', '\\\\').replace("'", "\\'") + "'"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    raise TypeError(f'Unsupported Lua override type: {type(value).__name__}')
+
+
+def build_module(root, build, module_name, patch_name, revision, template_bias=False, overrides=None):
     build.mkdir(parents=True, exist_ok=True)
     module = ''
     for variable, filename in [('create_api', 'windows_api.lua'), ('patch', patch_name),
@@ -15,8 +25,11 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
             if forbidden in code:
                 raise ValueError(f'Unsupported native modification API in {filename}: {forbidden}')
         module += f'local {variable} = (function()\n{code}\nend)()\n'
-        if variable == 'patch' and template_bias:
-            module += 'patch.template_bias_enabled = true\n'
+        if variable == 'patch':
+            if template_bias:
+                module += 'patch.template_bias_enabled = true\n'
+            for key in sorted((overrides or {}).keys()):
+                module += f'patch.{key} = {lua_literal(overrides[key])}\n'
     module += f"install_loader(create_api, patch, {{revision = '{revision}', "
     module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '})\n'
     path, output = build / 'mod.wrapper.lua', build / 'mod.ljbc'

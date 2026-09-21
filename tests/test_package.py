@@ -36,8 +36,37 @@ def main():
             assert zlib.crc32(png[offset + 4:end]) == int.from_bytes(png[end:end + 4], 'big')
             offset = end + 4
         assert offset == len(png)
-        assert provenance['revision'] in ('data-v16-native', 'data-v16-light-medium')
-        assert provenance['display_version'] == 'v16' and provenance['runtime_verified'] is False
+        expected_versions = {
+            'data-v16-native': 'v16',
+            'data-v16-light-medium': 'v16',
+            'data-v17-preview-low-budget-patrol': 'v17-preview',
+        }
+        assert provenance['revision'] in expected_versions
+        assert provenance['display_version'] == expected_versions[provenance['revision']]
+        assert provenance['runtime_verified'] is False
+        change = provenance.get('data_change')
+        assert change is not None
+        if provenance['revision'] == 'data-v17-preview-low-budget-patrol':
+            assert change['budget_multiplier'] == 0.1
+            assert change['budget_override_multiplier'] == 0.1
+            assert change['derive_override_from_base'] is False
+            assert change['guardforce_write_enabled'] is False
+            assert change['guardforce_changed'] == 'none'
+            assert change['illuminate_guardforce_multiplier'] == 1.0
+            assert change['interval_mode'] == 'fixed'
+            assert change['fixed_interval_min'] == 0.0
+            assert change['fixed_interval_max'] == 0.1
+            assert change['allow_zero_interval_min'] is True
+            assert change['group_multiplier'] == 10
+        else:
+            assert change['budget_multiplier'] == 6
+            assert change['budget_override_multiplier'] == 6
+            assert change['guardforce_write_enabled'] is True
+            assert change['guardforce_changed'] == 'illuminate_only'
+            assert change['illuminate_guardforce_multiplier'] == 0.25
+            assert change['interval_mode'] == 'divide'
+            assert change['interval_divisor'] == 10
+            assert change['group_multiplier'] == 10
         assert provenance['requires'] == [{'name': 'Bingus Shared Loader',
                                            'guid': '612eaf70-d682-43c7-9efd-16dcc695f977',
                                            'api': 1, 'minimum_version': 15}]

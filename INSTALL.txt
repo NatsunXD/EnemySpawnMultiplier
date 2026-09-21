@@ -1,53 +1,59 @@
-Enemy Spawn Multiplier 6x - v16 variants
+Enemy Spawn Multiplier - v16 and preview packages
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
 - Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
 - Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
+- Enemy-Spawn-Multiplier-Preview-Low-Budget-Patrol-v17-preview.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. Loader v15 discovers this mod from its
-declared addon entry; no loader registry edit or custom fork is required. Both
-variants use the same resource ID and cannot be combined.
+declared addon entry; no loader registry edit or custom loader fork is required.
+All packages use the same resource ID and cannot be combined.
 
-v16 keeps the Encounter budget override at 6x, raises nonzero per-type caps and
-the group clamp to 10x, and divides Patrol/Straggler intervals by 10. Typical
-20-40 second Straggler intervals become 2-4 seconds, 8-14 second Patrol
-intervals become 0.8-1.4 seconds, and a group clamp of 10 becomes 100.
+v16 variants
+------------
 
-The module also checks the two pending Patrol/Straggler deadlines every 100 ms.
-A future deadline longer than its new maximum interval is shortened to that
-maximum. Deadlines already due or within the configured interval are untouched.
-This covers the initial native delay and the native 5-second retry delay after a
-failed Patrol position query without repeatedly dividing the timer.
+The two v16 packages keep the Encounter budget override at 6x, raise nonzero
+per-type caps and the group clamp to 10x, and divide Patrol/Straggler intervals
+by 10. Typical 20-40 second Straggler intervals become 2-4 seconds, 8-14 second
+Patrol intervals become 0.8-1.4 seconds, and a group clamp of 10 becomes 100.
+The Light-Medium Bias package favors cheaper Encounter templates; Native
+Composition keeps native template weights.
 
-The desired target at cfg+0x50 remains native. v13 doubled this value, but the
-same value participates in the native combined-100 rejection formula and could
-reduce spawning in some population states. Pending queue quantities, population
-counters and executable code remain unchanged.
+Preview Low Budget Patrol
+-------------------------
 
-The Light-Medium Bias variant ranks supported Encounter candidates by cost per
-planned unit using their inline composition rows. If a faction exposes an
-incompatible layout, v16 keeps native weights and continues the
-core budget, cap and interval tuning instead of stopping midway.
+This package tests the opposite density split:
 
-Illuminate missions are identified by their 45-row faction cap table. Their
-GuardForce budget is reduced to one quarter during initialization so static
-defenders leave room under the shared native population gate. Existing entities
-and live population counters are never rewritten.
+- Encounter composition budget: 0.1x of the native value.
+- Timed Patrol and Straggler intervals: 0.0-0.1 seconds.
+- Nonzero per-type caps and group clamp: 10x.
+- GuardForce/static defenders: native budget and native schedule, with no write
+  to the GuardForce field.
+- Native template weights, population gates, position queries, queue handling
+  and executable code remain unchanged.
+
+The native timed path treats a maximum interval of exactly zero as disabled, so
+the preview keeps the maximum at 0.1 seconds and sets only the minimum to zero.
+Pending Patrol/Straggler deadlines later than 0.1 seconds are shortened to the
+new maximum. The mod still cannot remove the native effective-70, component-448,
+desired-target or combined-100 gates.
+
+Diagnostics
+-----------
 
 After a mission starts, inspect %LOCALAPPDATA%/EnemySpawnMultiplier.log.
-data-v16-native or data-v16-light-medium plus spawn_multiplier_ready means the
-active config was resolved. Expected values for the common 20-40 / 8-14 / 10
-config are i=2.00-4.00/0.80-1.40 g=100. f= identifies the faction from its cap
-table, gf= shows current/original GuardForce budget, and w= reports bias status.
-t= reports shortened deadlines. cfg= shows the selected config source. l=vanilla
-confirms the native population branches were not patched.
 
-The native 70/448 population gates, position queries and queue processing still
-apply. v16 improves effective density through higher data caps, larger allowed
-groups and shorter scheduling delays; it does not remove executable-code gates.
+- v16: data-v16-native or data-v16-light-medium plus spawn_multiplier_ready.
+- Preview: data-v17-preview-low-budget-patrol plus spawn_multiplier_ready.
+
+For the preview, a common 20-40 / 8-14 / 10 config should report
+p=10.0/100.0, i=0.00-0.10/0.00-0.10, g=100 and an unchanged gf= value.
+f= identifies the faction from its cap table, t= reports shortened deadlines,
+cfg= shows the selected config source, and w= reports template-bias status.
+l=vanilla confirms the native population branches were not patched.
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy
 the remaining mods.

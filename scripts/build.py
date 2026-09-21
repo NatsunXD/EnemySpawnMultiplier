@@ -1,4 +1,4 @@
-"""Build and verify Enemy Spawn Multiplier 6x without launching the game."""
+"""Build and verify Enemy Spawn Multiplier variants without launching the game."""
 import json
 import os
 from pathlib import Path
@@ -21,15 +21,37 @@ IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
 VARIANTS = {
     'base': {
         'revision': 'data-v16-native',
+        'public_version': 'v16',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
         'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and reduces Illuminate static-guard budget to preserve reinforcement capacity. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': False,
     },
     'light-medium': {
         'revision': 'data-v16-light-medium',
+        'public_version': 'v16',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
         'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. Unsupported faction template layouts fall back to native weights instead of stopping the core tuning. Illuminate static-guard budget is reduced to preserve reinforcement capacity. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
+    },
+    'preview-low-budget-patrol': {
+        'revision': 'data-v17-preview-low-budget-patrol',
+        'public_version': 'v17-preview',
+        'name': 'Enemy Spawn Multiplier Preview Low Budget Patrol',
+        'description': 'Preview experiment: reduces the Encounter composition budget to 0.1x, drives timed Patrol/Straggler intervals to 0.0-0.1 seconds with the group clamp at 10x, and leaves GuardForce/static defenders on the native budget and schedule. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
+        'template_bias': False,
+        'overrides': {
+            'budget_multiplier': 0.1,
+            'budget_override_multiplier': 0.1,
+            'derive_override_from_base': False,
+            'guardforce_write_enabled': False,
+            'illuminate_guardforce_multiplier': 1.0,
+            'interval_mode': 'fixed',
+            'fixed_interval_min': 0.0,
+            'fixed_interval_max': 0.1,
+            'allow_zero_interval_min': True,
+            'cap_multiplier': 10,
+            'group_multiplier': 10,
+        },
     },
 }
 
@@ -63,18 +85,36 @@ def main():
             print(run([sys.executable, Path(__file__), key]).strip())
         return
     if len(sys.argv) != 2 or sys.argv[1] not in VARIANTS:
-        raise SystemExit('Usage: build.py [base|light-medium]')
+        raise SystemExit('Usage: build.py [base|light-medium|preview-low-budget-patrol]')
     key = sys.argv[1]
     variant = VARIANTS[key]
     revision = variant['revision']
+    settings = {
+        'budget_multiplier': 6,
+        'budget_override_multiplier': 6,
+        'derive_override_from_base': True,
+        'guardforce_write_enabled': True,
+        'illuminate_guardforce_multiplier': 0.25,
+        'interval_mode': 'divide',
+        'interval_divisor': 10,
+        'fixed_interval_min': None,
+        'fixed_interval_max': None,
+        'allow_zero_interval_min': False,
+        'cap_multiplier': 10,
+        'group_multiplier': 10,
+    }
+    settings.update(variant.get('overrides') or {})
     build = BUILD / key
     for relative, expected in [('bin/helldivers2.exe', EXE_SHA), ('data/game/game.dll', GAME_DLL_SHA)]:
         if sha((GAME / relative).read_bytes()) != expected:
             raise ValueError('Unsupported game build: ' + relative)
     resources = build_module(ROOT, build, RESOURCE, 'spawn_patch.lua', revision,
-                             template_bias=variant['template_bias'])
+                             template_bias=variant['template_bias'],
+                             overrides=variant.get('overrides'))
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')
     tests = run([LUA, TESTS / 'test_data.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
+    if key == 'preview-low-budget-patrol':
+        tests += '\n' + run([LUA, TESTS / 'test_preview.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
     (build / 'offline-tests.txt').write_text(tests, encoding='utf-8')
     data = build / 'data'
     data.mkdir(exist_ok=True)
@@ -92,7 +132,8 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 16,
+        'version': 17 if key == 'preview-low-budget-patrol' else 16,
+        'public_version': variant['public_version'],
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],
         'game_exe_sha256': EXE_SHA, 'game_dll_sha256': GAME_DLL_SHA,
@@ -112,17 +153,23 @@ def main():
             'cfg_base_offset': '0x519A4', 'cfg_stride': '0x438',
             'interval_offsets': ['0x38', '0x3c', '0x40', '0x44'], 'group_clamp_offset': '0x48',
             'desired_offset': '0x50', 'desired_write': False,
-            'budget_override_offset': '0x78', 'budget_override_multiplier': 6,
+            'budget_override_offset': '0x78', 'budget_override_multiplier': settings['budget_override_multiplier'],
             'template_bias': 'relative_cost_per_unit' if variant['template_bias'] else 'native',
             'template_bias_quantiles': {'light_max': 0.5, 'medium_max': 0.8},
             'template_weight_multipliers': {'light': 3.6, 'medium': 1.25, 'heavy': 0.25},
             'template_bias_unsupported_layout': 'native_weight_fallback',
             'faction_cap_counts': {'automaton': 61, 'terminid': 44, 'illuminate': 45},
-            'illuminate_guardforce_multiplier': 0.25,
+            'illuminate_guardforce_multiplier': settings['illuminate_guardforce_multiplier'],
             'entry_stride': '0x80', 'max_offset': '0x18',
-            'budget_multiplier': 6, 'cap_multiplier': 10,
-            'interval_divisor': 10, 'group_multiplier': 10,
-            'mission_reset_check_seconds': 0.1, 'guardforce_changed': 'illuminate_only',
+            'budget_multiplier': settings['budget_multiplier'], 'cap_multiplier': settings['cap_multiplier'],
+            'derive_override_from_base': settings['derive_override_from_base'],
+            'interval_mode': settings['interval_mode'], 'interval_divisor': settings['interval_divisor'],
+            'fixed_interval_min': settings['fixed_interval_min'], 'fixed_interval_max': settings['fixed_interval_max'],
+            'allow_zero_interval_min': settings['allow_zero_interval_min'],
+            'group_multiplier': settings['group_multiplier'],
+            'mission_reset_check_seconds': 0.1,
+            'guardforce_changed': 'illuminate_only' if settings['guardforce_write_enabled'] else 'none',
+            'guardforce_write_enabled': settings['guardforce_write_enabled'],
             'live_counter_writes': False, 'pending_queue_writes': False,
             'native_timestamp_writes': 'future_deadline_clamp_only', 'runtime_verified': False,
             'native_code_patches': [],

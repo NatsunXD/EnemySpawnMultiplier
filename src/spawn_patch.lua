@@ -1,17 +1,19 @@
--- Raises the HiveMind encounter budget to 6x, expands data-driven caps/group
--- clamps to 10x and shortens patrol/straggler intervals to one tenth. Live spawn
--- frequency and per-wave group clamp come from the native
--- handle/hash resolver for the 0x438 config at director+0x519A4, not from
--- encounter points. Encounter points are a per-reinforcement composition
--- budget; they are not a remaining pool and do not control how often waves
--- fire. Illuminate GuardForce budget is reduced before static POI population
--- fills the shared native gate. Zero per-type cap rows are a native skip.
--- Population counters remain read-only. Existing Patrol and Straggler deadlines
--- are only shortened when they exceed the scaled maximum.
+-- Data-only spawn tuning profiles for the supported 1.8.45317.0 build.
+-- Encounter points are a per-reinforcement composition budget from
+-- director+0x518B0, not a remaining pool. Timed Patrol/Straggler frequency comes
+-- from the resolved 0x438 config at director+0x519A4. The v16 profiles raise the
+-- Encounter budget and shorten both timed paths. The preview profile lowers the
+-- Encounter budget while driving the timed paths to their positive scheduling
+-- floor, and can leave GuardForce entirely native. A zero maximum interval makes
+-- the native code skip that timed path, so the preview uses 0.0-0.1 seconds.
+-- Zero per-type cap rows are a native skip. Population counters and executable
+-- code remain read-only.
 local ffi
 local patch = {
     budget_multiplier = 6,
     budget_override_multiplier = 6,
+    derive_override_from_base = true,
+    guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
     template_bias_medium = 1.25,
@@ -20,7 +22,11 @@ local patch = {
     -- Raw cap-table counts observed on the supported 1.8.45317.0 build.
     faction_cap_counts = {automaton = 61, terminid = 44, illuminate = 45},
     cap_multiplier = 10,
+    interval_mode = 'divide',
     interval_divisor = 10,
+    fixed_interval_min = 0.1,
+    fixed_interval_max = 0.1,
+    allow_zero_interval_min = false,
     group_multiplier = 10,
     director_rva = 0x276CA20,
     mode_rva = 0x276c3d0,
@@ -218,13 +224,13 @@ local function scale_points(api, director, points)
         end
     end
     local target = mission.points_original * patch.budget_multiplier
-    if points <= mission.points_original * 1.05 then
+    if near(points, target) then
+        mission.points_applied = target
+    elseif points <= mission.points_original * 1.05 then
         if not api.write(director + patch.points_offset, pack_f32(target))
             or not near(number(api.read(director + patch.points_offset, 4), 0), target) then
             return false, 'spawn_points_write_failed'
         end
-        mission.points_applied = target
-    elseif near(points, target) then
         mission.points_applied = target
     elseif points > target * 1.05 then
         mission.points_original = points
@@ -240,6 +246,12 @@ local function scale_points(api, director, points)
     return true
 end
 local function scale_guardforce(api, director, guardforce, faction)
+    if not patch.guardforce_write_enabled then
+        if guardforce > 0 and not mission.guardforce_original then
+            mission.guardforce_original = guardforce
+        end
+        return true, guardforce
+    end
     if faction ~= 'illuminate' or not (guardforce > 0) then return true, guardforce end
     if not mission.guardforce_original then
         mission.guardforce_original = guardforce
@@ -355,7 +367,11 @@ local function read_config(api, address)
         and finite(cfg.override)) then
         return nil
     end
-    if cfg.i38 <= 0 or cfg.i3c <= 0 or cfg.i40 <= 0 or cfg.i44 <= 0 then return nil end
+    if patch.allow_zero_interval_min then
+        if cfg.i38 < 0 or cfg.i3c <= 0 or cfg.i40 < 0 or cfg.i44 <= 0 then return nil end
+    elseif cfg.i38 <= 0 or cfg.i3c <= 0 or cfg.i40 <= 0 or cfg.i44 <= 0 then
+        return nil
+    end
     if cfg.i38 > cfg.i3c or cfg.i40 > cfg.i44 then return nil end
     local limit = patch.max_interval * patch.interval_divisor
     if cfg.i38 > limit or cfg.i3c > limit or cfg.i40 > limit or cfg.i44 > limit then return nil end
@@ -366,7 +382,16 @@ end
 local function vanilla_config(cfg)
     return cfg.group <= patch.max_group and cfg.i3c >= patch.vanilla_patrol_max_floor
 end
-local function interval_target(original)
+local function interval_target(original, is_maximum)
+    if patch.interval_mode == 'fixed' then
+        if not finite(patch.fixed_interval_min) or not finite(patch.fixed_interval_max)
+            or patch.fixed_interval_min < 0 or patch.fixed_interval_max <= 0
+            or patch.fixed_interval_min > patch.fixed_interval_max then
+            return nil
+        end
+        if is_maximum then return patch.fixed_interval_max end
+        return patch.fixed_interval_min
+    end
     local target = original / patch.interval_divisor
     if target < patch.min_interval then return patch.min_interval end
     return target
@@ -507,10 +532,13 @@ local function scale_config(api, game, director)
         end
         mission.cfg[key] = baseline
     end
-    local t38 = interval_target(baseline.i38)
-    local t3c = interval_target(baseline.i3c)
-    local t40 = interval_target(baseline.i40)
-    local t44 = interval_target(baseline.i44)
+    local t38 = interval_target(baseline.i38, false)
+    local t3c = interval_target(baseline.i3c, true)
+    local t40 = interval_target(baseline.i40, false)
+    local t44 = interval_target(baseline.i44, true)
+    if not t38 or not t3c or not t40 or not t44 then
+        return nil, 'spawn_interval_profile_mismatch'
+    end
     if t38 > t3c then t38 = t3c end
     if t40 > t44 then t40 = t44 end
     local tgroup = baseline.group * patch.group_multiplier
@@ -538,7 +566,7 @@ local function scale_config(api, game, director)
         else
             override_target = cfg.override * patch.budget_override_multiplier
         end
-    else
+    elseif patch.derive_override_from_base then
         local points_bytes = api.read(director + patch.points_offset, 4)
         local base_points = points_bytes and number(points_bytes, 0) or 0
         if finite(base_points) and base_points > 0 then

@@ -24,7 +24,9 @@ def package_release(root: Path, build: Path, report: dict) -> Path:
         files[destination] = data
     slug = report['slug']
     # Public names share one format; provenance keeps the internal build revision.
-    release_version = 'v' + str(report.get('version') or report['revision']).rsplit('v', 1)[-1]
+    release_version = report.get('public_version')
+    if not release_version:
+        release_version = 'v' + str(report.get('version') or report['revision']).rsplit('v', 1)[-1]
     display_name = report['name'] + ' - ' + release_version
     release_stem = report['name'].replace(' ', '-') + '-' + release_version
     files[slug + '-README.txt'] = (root / 'INSTALL.txt').read_bytes()
@@ -39,7 +41,7 @@ def package_release(root: Path, build: Path, report: dict) -> Path:
         'runtime_verified': False,
         'files': {name: digest(data) for name, data in files.items()},
     }
-    for key in ('requires', 'provides', 'loader_integration'):
+    for key in ('requires', 'provides', 'loader_integration', 'data_change'):
         if key in report:
             provenance[key] = report[key]
     files[slug + '-manifest.json'] = (json.dumps(provenance, indent=2) + '\n').encode()
