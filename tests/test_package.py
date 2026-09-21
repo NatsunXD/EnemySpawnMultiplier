@@ -39,14 +39,14 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v16.8-preview-low-budget-patrol': 'v16.8-preview',
+            'data-v16.9-preview-low-budget-patrol': 'v16.9-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v16.8-preview-low-budget-patrol':
+        if provenance['revision'] == 'data-v16.9-preview-low-budget-patrol':
             assert change['budget_multiplier'] == 0.1
             assert change['budget_override_multiplier'] == 0.1
             assert change['derive_override_from_base'] is False
@@ -56,6 +56,10 @@ def main():
             assert change['encounter_admission_rva'] == '0x94C030'
             assert change['encounter_deadline_enabled'] is True
             assert change['encounter_max_interval'] == 2.0
+            assert change['traveler_cooldown_enabled'] is True
+            assert change['traveler_cooldown_min'] == 2.0
+            assert change['traveler_cooldown_max'] == 5.0
+            assert change['hive_mind_config']['traveler_spawn_point_cooldown'] == ['0x0C', '0x10']
             assert change['probe_timers_enabled'] is True
             assert change['probe_timer_offsets'] == ['0x399D0', '0x399E8', '0x399F0', '0x3A510', '0x3A528', '0x3A530', '0x3A538']
             assert change['timeline_log'] == {'interval_seconds': 1.0, 'rotate_bytes': 4194304}
@@ -78,6 +82,7 @@ def main():
             assert change['budget_multiplier'] == 6
             assert change['budget_override_multiplier'] == 6
             assert change['encounter_deadline_enabled'] is False
+            assert change['traveler_cooldown_enabled'] is False
             assert change['probe_timers_enabled'] is False
             assert change['guardforce_write_enabled'] is True
             assert change['guardforce_changed'] == 'illuminate_only'

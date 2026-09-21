@@ -12,6 +12,9 @@ patch.force_override_to_base = true
 patch.encounter_deadline_enabled = true
 patch.encounter_max_interval = 2.0
 patch.probe_timers_enabled = true
+patch.traveler_cooldown_enabled = true
+patch.traveler_cooldown_min = 2.0
+patch.traveler_cooldown_max = 5.0
 patch.guardforce_write_enabled = false
 patch.illuminate_guardforce_multiplier = 1.0
 patch.interval_mode = 'fixed'
@@ -163,6 +166,8 @@ end
 
 local function fill_config(min8, max8, min1, max1, group, desired, override)
     local cfg = director + patch.cfg_base_offset
+    put_f32(cfg + 0x0c, 30)
+    put_f32(cfg + 0x10, 60)
     put_f32(cfg + 0x38, min8)
     put_f32(cfg + 0x3c, max8)
     put_f32(cfg + 0x40, min1)
@@ -216,6 +221,9 @@ assert(patch.detail:find('i=0.00-0.10/0.00-0.10', 1, true))
 assert(patch.detail:find('g=100', 1, true))
 assert(patch.detail:find('d=30', 1, true))
 assert(patch.detail:find('t=3', 1, true))
+assert(patch.detail:find('tv=2.0-5.0', 1, true))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 2.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 5.0))
 pass('preview lowers Encounter to 0.1x and clamps the reinforcement cooldown to two seconds')
 
 local settled_writes = writes
@@ -225,6 +233,8 @@ assert(approx(get_f32(director + patch.points_offset), 10))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
 assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 2.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 5.0))
 pass('preview budget, interval and cooldown writes are idempotent')
 
 -- A pending reinforcement cooldown that is already due or inside the new window
@@ -262,6 +272,23 @@ ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == override_writes)
 assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
 pass('strict preview forces the effective override to the scaled base and remains idempotent')
+
+-- The traveler (spawn point) cooldown pair must come from the stored baseline,
+-- not from the already-scaled live value, or the second pass would stack it.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(0, 0.1, 0, 0.1, 100, 30, -1)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 2.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 5.0))
+local traveler_writes = writes
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and writes == traveler_writes)
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 2.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 5.0))
+pass('an already-scaled traveler cooldown is not scaled twice')
 
 -- A config already in the preview state must not multiply its group or intervals again.
 director_present = false

@@ -1,83 +1,81 @@
-Enemy Spawn Multiplier - v16 and v16.8 preview packages
+Enemy Spawn Multiplier - v16 and v16.9 preview packages
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
 - Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
 - Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
-- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.8-preview.zip
+- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.9-preview.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. All packages use the same resource ID
 and cannot be combined.
 
-v16.8 fast-cadence preview
+v16.9 fast-cadence preview
 --------------------------
 
-Carried over from v16.7: the effective cfg+0x78 override is forced to the scaled
-director base, the enemy reinforcement cooldown at director+0x399D8 is clamped
-to two seconds, timed Patrol/Straggler intervals are fixed at 0.0-0.1 seconds,
-the nonzero cap rows and group clamp stay at 10x, and GuardForce/static
-defenders stay fully native.
+v16.9 acts on what two read-only captures of unmodified missions established:
 
-New in v16.8:
+1. The spawn-config row at director+0x519A4 really is HiveMindComponent
+   (typelib size 1080 = 0x438). Its fields are now mapped by name.
+2. The four Patrol/Straggler candidate pools were empty for the whole of both
+   captures, and all four scheduler enable flags read 0. The timed Patrol
+   scheduler at game.dll+0x9516B0 therefore never ran, so editing cfg+0x40/+0x44
+   could not change Patrol cadence.
+3. Patrol squads did appear, but every 45-63 seconds - matching the documented
+   TravelerSettings range of 30-60 seconds, not the 8-14 second Patrol interval.
+4. The enemy reinforcement cooldown at director+0x399D8 was never rewritten
+   after mission start, so the v16.7 clamp had nothing to act on.
 
-- The log is now a timeline. A sample line is appended about once per second
-  instead of the file being overwritten with a single snapshot. The file
-  rotates to EnemySpawnMultiplier.log.1 after 4 MB.
-- Eight more director timer fields near the encounter and Patrol deadlines are
-  probed read-only and reported in the T= field, so the next mission shows
-  which other timers the game keeps armed.
-- The scheduler gate inputs stay in the log: a=, b=, d=, pd=, sd=, fl=.
+v16.9 therefore changes the Patrol lever:
 
-Why the previous results looked unchanged
------------------------------------------
+- cfg+0x0C / cfg+0x10 = TravelerSettings minimum/maximum spawn-point cooldown.
+  The preview writes 2.0 / 5.0 seconds instead of the native 30 / 60.
+- The effective Encounter override is still forced to the scaled director base,
+  so the 0.1x reinforcement budget cannot be bypassed.
+- Timed Patrol/Straggler intervals stay at 0.0-0.1 seconds. They are inert while
+  the pools are empty, but harmless and correct when a mission does populate
+  them.
+- Nonzero per-type caps and the group clamp stay at 10x.
+- GuardForce/static defenders stay fully native.
 
-The v16.6 log contained one snapshot only, and that snapshot was taken while the
-timed scheduler was disabled:
+The spawn-point write uses the same checked, readback, idempotent path as the
+other config writes, and stores its baseline so a second pass cannot stack it.
 
-    a=0 b=40 d=30 pd=-354.98 sd=-354.95 fl=0000
+New diagnostic fields
+---------------------
 
-fl=0000 means all four scheduler enable flags at
-director+0x5189C/0x518A0/0x518A4/0x518A8 were zero, so the Straggler and Patrol
-branches at game.dll+0x9511F0 were skipped entirely. While those branches are
-skipped, no interval value can change Patrol cadence. The same snapshot showed
-e=-429.30, so the reinforcement cooldown was already in the past at that moment
-and nothing was left to clamp. Both observations are why v16.8 adds a timeline
-instead of another blind write.
+- tv=  TravelerSettings minimum/maximum spawn-point cooldown, current values.
+- o=   effective cfg+0x78 encounter-point override.
+- e=   seconds until the reinforcement cooldown at 0x399D8.
+- m=   live Encounter manager list count.
+- a=   scheduling counter A (manager+0x4A4); the scheduler exits when A >= d.
+- b=   scheduling counter B (manager+0x1CA); the scheduler also exits when
+       (d-a)+(b-a) >= 100.
+- pd=  Patrol deadline delta in seconds.
+- sd=  Straggler deadline delta in seconds.
+- fl=  the four scheduler enable flags at 0x5189C/0x518A0/0x518A4/0x518A8.
+- T=   probed director timer offsets within an hour of the mission clock.
+- t=   deadlines shortened on this check.
+- n=   a deadline existed but its owning field was not writable private data.
 
-Reading the log
----------------
+Expect tv=2.0-5.0 in the preview log. If Patrol squads still appear at their
+native 45-63 second cadence with tv=2.0-5.0 written, then spawn points are not
+the patrol source either and the Patrol spawner entities have to be located
+through the component manager.
 
-Each line is: time status detail. Fields:
+Reference data
+--------------
 
-- p=  Encounter (reinforcement) budget, current/original.
-- o=  effective cfg+0x78 override after the mod resolves the active config.
-- e=  seconds until the reinforcement cooldown at 0x399D8. Negative means it
-      already expired.
-- m=  live Encounter manager list count.
-- a=  scheduling counter A (manager+0x4A4). The scheduler exits when A >= d.
-- b=  scheduling counter B (manager+0x1C). The scheduler also exits when
-      (d-a)+(b-a) >= 100.
-- pd= Patrol deadline delta in seconds.
-- sd= Straggler deadline delta in seconds.
-- fl= the four scheduler enable flags, in order 0x5189C, 0x518A0, 0x518A4,
-      0x518A8.
-- T=  probed director timer fields that currently sit within one hour of the
-      mission clock, printed as offset:delta.
-- t=  deadlines shortened on this check.
-- n=  a deadline existed but its owning field was not writable private data.
-- x=  ProducedFighter counter, read-only.
+The 0x438 row is HiveMindComponent with MissionDifficultySettings at +0x88.
+Useful named levers inside those 60-byte modifier blocks:
 
-What to send back
------------------
-
-Play one mission with the preview enabled and send
-%LOCALAPPDATA%/EnemySpawnMultiplier.log (or the rotated pair). The useful
-evidence is the e= column around each reinforcement and whether fl= ever
-becomes nonzero. If fl stays 0000 for the whole mission, the Patrol interval
-route is not the mechanism the game uses and the Patrol spawner path has to be
-re-read; if fl flips to nonzero, the remaining question is only the interval.
+- +0x164 encounter_cooldown_rate_modifier
+- +0x1A0 patrol_count_max_modifier
+- +0x1DC patrol_spawn_cooldown_rate_modifier
+- +0x290 spawner_spawn_count_modifier
+- +0x3BC travelers_waves_cooldown_multiplier
+- +0x3F8 travelers_max_unit_count_multiplier
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy
 the remaining mods.

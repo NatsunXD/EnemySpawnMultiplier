@@ -16,6 +16,13 @@ local patch = {
     force_override_to_base = false,
     encounter_deadline_enabled = false,
     encounter_max_interval = 2.0,
+    -- cfg+0x0C/+0x10 are TravelerSettings.minimum/maximum_spawn_point_cooldown
+    -- in HiveMindComponent: "the amount of time that a spawn point goes on
+    -- cooldown after being used". Documented default is 30-60 seconds and the
+    -- measured patrol cadence was 45-63 seconds across two vanilla sessions.
+    traveler_cooldown_enabled = false,
+    traveler_cooldown_min = 0,
+    traveler_cooldown_max = 0,
     guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
@@ -175,6 +182,8 @@ local function describe(points, original, valid, count, timers, pop, cfg,
         faction or 'unknown',
         valid or 0, count or 0, timers or 0, pop or 0,
         i38, i3c, i40, i44, group, desired, override)
+    patch.detail = patch.detail .. string.format(' tv=%.1f-%.1f',
+        cfg and cfg.traveler_min or 0, cfg and cfg.traveler_max or 0)
 end
 local function retarget_table(api, director, table_bytes, rows, table_size)
     ffi = ffi or require('ffi')
@@ -407,6 +416,7 @@ local function copy_cfg(cfg)
     return {
         i38 = cfg.i38, i3c = cfg.i3c, i40 = cfg.i40, i44 = cfg.i44,
         group = cfg.group, desired = cfg.desired, override = cfg.override,
+        traveler_min = cfg.traveler_min, traveler_max = cfg.traveler_max,
     }
 end
 local function read_config(api, address)
@@ -414,7 +424,11 @@ local function read_config(api, address)
     if not bytes or #bytes < 0x1c then return nil end
     local override_bytes = api.read(address + patch.cfg_override_offset, 4)
     if not override_bytes then return nil end
+    local traveler_bytes = api.read(address + 0x0c, 8)
+    if not traveler_bytes then return nil end
     local cfg = {
+        traveler_min = number(traveler_bytes, 0),
+        traveler_max = number(traveler_bytes, 4),
         i38 = number(bytes, 0),
         i3c = number(bytes, 4),
         i40 = number(bytes, 8),
@@ -424,7 +438,10 @@ local function read_config(api, address)
         override = number(override_bytes, 0),
     }
     if not (finite(cfg.i38) and finite(cfg.i3c) and finite(cfg.i40) and finite(cfg.i44)
-        and finite(cfg.override)) then
+        and finite(cfg.override) and finite(cfg.traveler_min) and finite(cfg.traveler_max)) then
+        return nil
+    end
+    if cfg.traveler_min < 0 or cfg.traveler_max < 0 or cfg.traveler_min > cfg.traveler_max then
         return nil
     end
     if patch.allow_zero_interval_min then
@@ -584,7 +601,8 @@ local function scale_config(api, game, director)
     local cfg = read_config(api, address)
     if not cfg then return 0, nil, 'spawn_config_layout_mismatch@' .. source end
     if not api.writable_data(address + 0x38, 0x1c)
-        or not api.writable_data(address + patch.cfg_override_offset, 4) then
+        or not api.writable_data(address + patch.cfg_override_offset, 4)
+        or (patch.traveler_cooldown_enabled and not api.writable_data(address + 0x0c, 8)) then
         return 0, nil, 'spawn_config_not_writable_private_data@' .. source
     end
     local key = source .. ':' .. tostring(address)
@@ -604,6 +622,8 @@ local function scale_config(api, game, director)
                     group = restored,
                     desired = cfg.desired,
                     override = cfg.override,
+                    traveler_min = cfg.traveler_min,
+                    traveler_max = cfg.traveler_max,
                 }
             else
                 baseline = copy_cfg(cfg)
@@ -635,6 +655,19 @@ local function scale_config(api, game, director)
             or u32(api.read(address + 0x48, 4) or '', 0) ~= tgroup then
             return nil, 'spawn_group_write_failed'
         end
+    end
+    local tvc_min, tvc_max = baseline.traveler_min, baseline.traveler_max
+    if patch.traveler_cooldown_enabled then
+        local target_min, target_max = patch.traveler_cooldown_min, patch.traveler_cooldown_max
+        if not finite(target_min) or not finite(target_max)
+            or target_min < 0 or target_max <= 0 or target_min > target_max then
+            return nil, 'spawn_traveler_interval_profile_mismatch'
+        end
+        if not write_interval(api, address, 0x0c, cfg.traveler_min, target_min)
+            or not write_interval(api, address, 0x10, cfg.traveler_max, target_max) then
+            return nil, 'spawn_traveler_write_failed'
+        end
+        tvc_min, tvc_max = target_min, target_max
     end
     local override_target
     local state_key = tostring(address)
@@ -672,6 +705,7 @@ local function scale_config(api, game, director)
         i38 = t38, i3c = t3c, i40 = t40, i44 = t44,
         group = tgroup, desired = baseline.desired,
         override = override_target or cfg.override,
+        traveler_min = tvc_min, traveler_max = tvc_max,
     }
     return scaled, first, source .. '@' .. tostring(address)
 end
