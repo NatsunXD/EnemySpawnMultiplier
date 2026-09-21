@@ -23,6 +23,15 @@ local patch = {
     traveler_cooldown_enabled = false,
     traveler_cooldown_min = 0,
     traveler_cooldown_max = 0,
+    -- MissionDifficultySettings modifier curves inside the same 0x438 row.
+    -- Each block is 15 floats (5 + 4 + 1 + 5) blended per difficulty/progress by
+    -- game.dll+0xD49E70. A value of 0 disables that block. Fields whose name
+    -- contains _rate_ are frequency multipliers; cooldown shrinks as they grow.
+    modifier_scale_enabled = false,
+    modifier_encounter_cooldown = 0,   -- cfg+0x164 encounter_cooldown_rate_modifier
+    modifier_patrol_count = 0,         -- cfg+0x1A0 patrol_count_max_modifier
+    modifier_patrol_cooldown = 0,      -- cfg+0x1DC patrol_spawn_cooldown_rate_modifier
+    modifier_state_key = 'none',
     guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
@@ -93,6 +102,7 @@ local originals = {}
 local clones = {block = nil, size = 0}
 local resource_clone = {source = nil, block = nil, size = 0}
 local override_state = {}
+local modifier_state = {}
 local mission = {
     director = nil, key = nil, points_original = nil, points_applied = nil,
     guardforce_original = nil, guardforce_applied = nil,
@@ -412,6 +422,69 @@ local function scale_candidate_weights(api, director)
     end
     return #candidates, count
 end
+local MODIFIER_BLOCK_SIZE = 15
+local MODIFIER_BLOCKS = {
+    {offset = 0x164, key = 'encounter_cooldown', label = 'spawn_modifier_encounter_cooldown'},
+    {offset = 0x1a0, key = 'patrol_count', label = 'spawn_modifier_patrol_count'},
+    {offset = 0x1dc, key = 'patrol_cooldown', label = 'spawn_modifier_patrol_cooldown'},
+}
+local function modifier_scales()
+    return {
+        encounter_cooldown = patch.modifier_encounter_cooldown,
+        patrol_count = patch.modifier_patrol_count,
+        patrol_cooldown = patch.modifier_patrol_cooldown,
+    }
+end
+local function scale_modifier_block(api, address, offset, scale, label)
+    if not finite(scale) or scale <= 0 then return 0, -1 end
+    if scale < 0.05 or scale > 50 then
+        return nil, label .. '_scale_out_of_range'
+    end
+    if not api.writable_data(address + offset, MODIFIER_BLOCK_SIZE * 4) then
+        return nil, label .. '_not_writable_private_data'
+    end
+    -- cdata pointers are not reliable table keys here; the existing override
+    -- state uses the string form for the same reason.
+    local state_key = tostring(address)
+    local store = modifier_state[state_key]
+    if not store then store = {}; modifier_state[state_key] = store end
+    local saved = store[offset]
+    local current = {}
+    for index = 0, MODIFIER_BLOCK_SIZE - 1 do
+        local bytes = api.read(address + offset + index * 4, 4)
+        if not bytes then return nil, label .. '_unreadable' end
+        current[index] = number(bytes, 0)
+        if not finite(current[index]) then return nil, label .. '_layout_mismatch' end
+    end
+    if not saved then
+        saved = {baseline = {}}
+        for index = 0, MODIFIER_BLOCK_SIZE - 1 do saved.baseline[index] = current[index] end
+        store[offset] = saved
+    end
+    local changed = 0
+    for index = 0, MODIFIER_BLOCK_SIZE - 1 do
+        local base = saved.baseline[index]
+        if base ~= 0 then
+            local target = base * scale
+            local live = current[index]
+            if not near(live, target) then
+                if not near(live, base) then
+                    -- The row was legitimately re-blended for the new difficulty;
+                    -- adopt the new native value as the baseline instead of stacking.
+                    saved.baseline[index] = live
+                    target = live * scale
+                end
+                if not api.write(address + offset + index * 4, pack_f32(target))
+                    or not near(number(api.read(address + offset + index * 4, 4) or '', 0), target) then
+                    return nil, label .. '_write_failed'
+                end
+                changed = changed + 1
+            end
+        end
+    end
+    local head = api.read(address + offset, 4)
+    return changed, head and number(head, 0) or -1
+end
 local function copy_cfg(cfg)
     return {
         i38 = cfg.i38, i3c = cfg.i3c, i40 = cfg.i40, i44 = cfg.i44,
@@ -605,6 +678,13 @@ local function scale_config(api, game, director)
         or (patch.traveler_cooldown_enabled and not api.writable_data(address + 0x0c, 8)) then
         return 0, nil, 'spawn_config_not_writable_private_data@' .. source
     end
+    if patch.modifier_scale_enabled then
+        for _, block in ipairs(MODIFIER_BLOCKS) do
+            if not api.writable_data(address + block.offset, MODIFIER_BLOCK_SIZE * 4) then
+                return 0, nil, block.label .. '_not_writable_private_data@' .. source
+            end
+        end
+    end
     local key = source .. ':' .. tostring(address)
     local baseline = mission.cfg[key]
     if not baseline then
@@ -668,6 +748,19 @@ local function scale_config(api, game, director)
             return nil, 'spawn_traveler_write_failed'
         end
         tvc_min, tvc_max = target_min, target_max
+    end
+    patch.modifier_detail = ''
+    if patch.modifier_scale_enabled then
+        local scales = modifier_scales()
+        local parts = {}
+        for _, block in ipairs(MODIFIER_BLOCKS) do
+            local applied, head = scale_modifier_block(api, address, block.offset, scales[block.key], block.label)
+            if applied == nil then return nil, head end
+            parts[#parts + 1] = string.format('%.2f', head)
+        end
+        patch.modifier_detail = ' mv=' .. table.concat(parts, '/')
+            .. ' ms=' .. string.format('%.1f/%.1f/%.1f',
+                scales.encounter_cooldown, scales.patrol_count, scales.patrol_cooldown)
     end
     local override_target
     local state_key = tostring(address)
@@ -843,6 +936,7 @@ function patch.apply(api, game)
         scaled_guardforce, mission.guardforce_original, faction)
     patch.detail = patch.detail .. scheduler_status(api, game, director)
         .. (timer_note and (' n=' .. timer_note) or '')
+        .. (patch.modifier_detail or '')
         .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
         .. (bias_reason and (':' .. bias_reason) or '')
         .. ' cfg=' .. tostring(cfg_reason)

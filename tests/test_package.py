@@ -39,14 +39,14 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v16.9-preview-low-budget-patrol': 'v16.9-preview',
+            'data-v16.10-preview-low-budget-patrol': 'v16.10-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v16.9-preview-low-budget-patrol':
+        if provenance['revision'] == 'data-v16.10-preview-low-budget-patrol':
             assert change['budget_multiplier'] == 0.1
             assert change['budget_override_multiplier'] == 0.1
             assert change['derive_override_from_base'] is False
@@ -56,9 +56,16 @@ def main():
             assert change['encounter_admission_rva'] == '0x94C030'
             assert change['encounter_deadline_enabled'] is True
             assert change['encounter_max_interval'] == 2.0
-            assert change['traveler_cooldown_enabled'] is True
-            assert change['traveler_cooldown_min'] == 2.0
-            assert change['traveler_cooldown_max'] == 5.0
+            assert change['traveler_cooldown_enabled'] is False
+            assert change['modifier_scale_enabled'] is True
+            assert change['modifier_scales'] == {'encounter_cooldown': 3.0,
+                                                 'patrol_count': 3.0,
+                                                 'patrol_cooldown': 3.0}
+            assert change['modifier_blocks']['encounter_cooldown_rate'] == '0x164'
+            assert change['modifier_blocks']['patrol_count_max'] == '0x1A0'
+            assert change['modifier_blocks']['patrol_spawn_cooldown_rate'] == '0x1DC'
+            assert change['modifier_blocks']['block_floats'] == 15
+            assert change['modifier_blocks']['evaluator_rva'] == '0xD49E70'
             assert change['hive_mind_config']['traveler_spawn_point_cooldown'] == ['0x0C', '0x10']
             assert change['probe_timers_enabled'] is True
             assert change['probe_timer_offsets'] == ['0x399D0', '0x399E8', '0x399F0', '0x3A510', '0x3A528', '0x3A530', '0x3A538']
@@ -83,6 +90,7 @@ def main():
             assert change['budget_override_multiplier'] == 6
             assert change['encounter_deadline_enabled'] is False
             assert change['traveler_cooldown_enabled'] is False
+            assert change['modifier_scale_enabled'] is False
             assert change['probe_timers_enabled'] is False
             assert change['guardforce_write_enabled'] is True
             assert change['guardforce_changed'] == 'illuminate_only'

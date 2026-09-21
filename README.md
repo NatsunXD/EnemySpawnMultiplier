@@ -19,7 +19,7 @@
 
 1. 关闭游戏。
 2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases) 并设置为最高优先级。
-3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`、`Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip` 或 `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.9-preview.zip`，三选一。
+3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`、`Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip` 或 `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.10-preview.zip`，三选一。
 4. 重新部署并重启游戏。
 
 ## 🤝 参与贡献
@@ -53,9 +53,9 @@ Both variants use the native Encounter budget override at `6x`, scale nonzero pe
 
 The mod changes writable private data only and does not modify executable pages. Illuminate GuardForce budget is reduced to one quarter during initialization so static defenders leave capacity under the shared native population gate. Native population gates, position checks, template availability, and queue processing remain active.
 
-Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install exactly one of `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`, `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`, or `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.9-preview.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
+Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install exactly one of `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`, `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`, or `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.10-preview.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
 
-A fast-cadence preview package tests the opposite density split: `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.9-preview.zip` lowers the reinforcement budget to `0.1x` while forcing a positive `cfg+0x78` override to the scaled director base, writes the `TravelerSettings` spawn-point cooldown at `cfg+0x0C/+0x10` to `2-5` seconds instead of the native `30-60` seconds, clamps the reinforcement cooldown at `director+0x399D8` to two seconds, runs timed Patrol/Straggler intervals at `0.0-0.1` seconds, keeps the `10x` cap and group expansion, and leaves GuardForce/static defenders native. The log is a one-second timeline and records `tv=`, the cooldown delta, the two scheduling counters that gate the timed scheduler, the Patrol/Straggler deadline deltas, the scheduler enable flags and a probe of nearby director timers. It uses the same resource ID, so install it instead of either v16 variant.
+A fast-cadence preview package tests the opposite density split: `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.10-preview.zip` lowers the reinforcement budget to `0.1x` while forcing a positive `cfg+0x78` override to the scaled director base, multiplies the `MissionDifficultySettings` curves `encounter_cooldown_rate` (`cfg+0x164`), `patrol_count_max` (`cfg+0x1A0`) and `patrol_spawn_cooldown_rate` (`cfg+0x1DC`) by `3.0` inside the same `0x438` row, clamps the reinforcement cooldown at `director+0x399D8` to two seconds, runs timed Patrol/Straggler intervals at `0.0-0.1` seconds, keeps the `10x` cap and group expansion, and leaves GuardForce/static defenders native. The log is a one-second timeline and records `tv=`, the cooldown delta, the two scheduling counters that gate the timed scheduler, the Patrol/Straggler deadline deltas, the scheduler enable flags and a probe of nearby director timers. It uses the same resource ID, so install it instead of either v16 variant.
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 
