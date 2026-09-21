@@ -74,7 +74,7 @@ adopt the faster v16 schedule.
 
 ## Preview profile: low Encounter / high timed patrol
 
-`data-v17-preview-low-budget-patrol` is a mutually exclusive preview package
+`data-v16.6-preview-low-budget-patrol` is a mutually exclusive preview package
 that tests whether pressure can be shifted away from Encounter waves toward the
 timed Patrol/Straggler paths:
 
@@ -82,7 +82,7 @@ timed Patrol/Straggler paths:
 |---|---|---|
 | `director+0x518B0` Encounter budget | `6x` | `0.1x` |
 | `director+0x518B4` GuardForce budget | Illuminate `0.25x` | unchanged; no write |
-| `cfg+0x78` positive override | `6x` baseline | `0.1x`; non-positive native override is left native |
+| `cfg+0x78` positive override | `6x` baseline | forced to the scaled director base; a native override cannot bypass the 0.1x budget |
 | cap table row `+0x18` | `10x` | `10x` |
 | `cfg+0x38/+0x3C` Straggler interval | `/10`, floor `0.1 s` | fixed minimum `0.0`, maximum `0.1 s` |
 | `cfg+0x40/+0x44` Patrol interval | `/10`, floor `0.1 s` | fixed minimum `0.0`, maximum `0.1 s` |
@@ -96,17 +96,26 @@ random calculation computes `max - min` and adds the minimum back. The module
 also refuses a config whose maximum interval is zero instead of silently
 disabling Patrol or Straggler spawning.
 
-Preview writes the Encounter budget to `0.1x` and does not synthesize a positive
-`cfg+0x78` override when the native value is non-positive. This avoids the
-double-scaling path that would otherwise produce `0.01x` after the director
-budget was already reduced. If a mission already contains a positive override,
-the preview scales that value by `0.1x` and tracks it idempotently.
+v16.5 exposed the override bypass: native function `0x94AF30` returns the
+`cfg+0x78` value directly when it is positive, before reading
+`director+0x518B0`. Scaling a native `21600` override by `0.1` therefore leaves
+an effective budget of `2160`, not `60`. The strict preview reads the already
+scaled director base and writes that same value to `cfg+0x78`, so the effective
+native budget path is forced to the intended scaled value and remains
+idempotent.
 
 GuardForce is left completely native in the preview: the module does not write
 `director+0x518B4` for any faction. The 10x cap and group expansion remains in
 place so timed patrol groups can request larger data-driven sizes, but the
 native effective-70, component-448, desired-target and combined-100 gates still
 apply. The preview does not add executable code patches or native spawn calls.
+
+Encounter cadence is separate from the composition budget. Native gate
+`0x94C030` checks `director+0x399D8` against the game clock before accepting a
+new Encounter. The preview reads that deadline and the live manager count into
+`e=` and `m=` diagnostics only. It does not write `0x399D8` until the field's
+writer and lifecycle are validated with a live read-only capture; an
+event-driven cooldown clamp is the next candidate, not part of v16.6.
 
 `cfg+0x50` is deliberately no longer scaled. Native function `0x9511F0` first
 checks the active component count against the scaled target, then rejects when
@@ -159,10 +168,10 @@ headroom under the unchanged shared population checks.
 ## Diagnostics and validation
 
 The log revision is `data-v16-native`, `data-v16-light-medium`, or
-`data-v17-preview-low-budget-patrol`. `p=` reports
+`data-v16.6-preview-low-budget-patrol`. `p=` reports
 Encounter budget, `gf=` GuardForce current/original budget, `f=` detected
 faction, `c=` cap rows, `i=` scaled Straggler/Patrol intervals, `g=` group clamp,
-`d=` unchanged desired target, `t=` deadlines shortened on the latest check,
+`d=` unchanged desired target, `o=` effective `cfg+0x78` override, `e=` seconds until the read-only Encounter deadline, `m=` live Encounter manager count, `t=` Patrol/Straggler deadlines shortened on the latest check,
 `w=` biased/available candidates or its fallback reason, and `cfg=` the active
 resolver result. `l=vanilla` confirms executable population branches are unchanged.
 
@@ -171,7 +180,7 @@ timer clamping, idempotence, config resolution, resource and cap-table cloning,
 template bias, mission rebuilds, queue/counter preservation, and failure paths.
 The preview suite additionally covers the `0.1x` Encounter write, native
 GuardForce preservation, fixed `0.0-0.1` second intervals, zero-maximum
-rejection, positive-override scaling, and no-stacking behavior.
+rejection, strict positive-override replacement, Encounter deadline diagnostics, and no-stacking behavior.
 Package tests verify the manifest, hashes, both resource identities, the exact
 v15 discovery declaration and forwarding target, absence of custom DLLs, and
 absence of executable-page modification APIs. Runtime verification remains false

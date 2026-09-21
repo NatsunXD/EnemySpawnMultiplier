@@ -39,17 +39,21 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v17-preview-low-budget-patrol': 'v17-preview',
+            'data-v16.6-preview-low-budget-patrol': 'v16.6-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v17-preview-low-budget-patrol':
+        if provenance['revision'] == 'data-v16.6-preview-low-budget-patrol':
             assert change['budget_multiplier'] == 0.1
             assert change['budget_override_multiplier'] == 0.1
             assert change['derive_override_from_base'] is False
+            assert change['force_override_to_base'] is True
+            assert change['encounter_deadline_offset'] == '0x399D8'
+            assert change['encounter_manager_rva'] == '0x276C348'
+            assert change['encounter_manager_count_offset'] == '0x934'
             assert change['guardforce_write_enabled'] is False
             assert change['guardforce_changed'] == 'none'
             assert change['illuminate_guardforce_multiplier'] == 1.0

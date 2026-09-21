@@ -8,6 +8,7 @@ local patch = assert(loadfile(source .. '/spawn_patch.lua'))()
 patch.budget_multiplier = 0.1
 patch.budget_override_multiplier = 0.1
 patch.derive_override_from_base = false
+patch.force_override_to_base = true
 patch.guardforce_write_enabled = false
 patch.illuminate_guardforce_multiplier = 1.0
 patch.interval_mode = 'fixed'
@@ -188,11 +189,13 @@ assert(ok and active and reason == 'spawn_multiplier_ready')
 assert(approx(get_f32(director + patch.points_offset), 10))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), -1))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
 assert(get_u32(entries + patch.max_offset) == 10)
 assert(get_u64(director + patch.timer_offsets[1]) == 1100000)
 assert(get_u64(director + patch.timer_offsets[2]) == 1100000)
 assert(patch.detail:find('p=10.0/100.0', 1, true))
+assert(patch.detail:find('o=10.00', 1, true))
+assert(patch.detail:find('e=', 1, true) and patch.detail:find('m=', 1, true))
 assert(patch.detail:find('gf=600.0/600.0', 1, true))
 assert(patch.detail:find('i=0.00-0.10/0.00-0.10', 1, true))
 assert(patch.detail:find('g=100', 1, true))
@@ -207,20 +210,21 @@ assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
 pass('preview budget and interval writes are idempotent')
 
--- A positive native override is scaled to 0.1x, but a vanilla non-positive
--- override is left alone instead of being synthesized from the already-scaled base.
+-- A strict preview ignores the native override value and forces the resolved
+-- config to the already-scaled director base, preventing a positive override
+-- from bypassing the 0.1x budget.
 director_present = false
 assert(patch.apply(api, game))
 mission(faction_caps(45, 2000), 100, 600)
 fill_config(20, 40, 8, 14, 10, 30, 20)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 2))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
 local override_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == override_writes)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 2))
-pass('preview scales only an existing positive override and remains idempotent')
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
+pass('strict preview forces the effective override to the scaled base and remains idempotent')
 
 -- A config already in the preview state must not multiply its group or intervals again.
 director_present = false

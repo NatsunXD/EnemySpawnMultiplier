@@ -13,6 +13,7 @@ local patch = {
     budget_multiplier = 6,
     budget_override_multiplier = 6,
     derive_override_from_base = true,
+    force_override_to_base = false,
     guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
@@ -34,6 +35,9 @@ local patch = {
     cap_table_offset = 0x660,
     cap_header_size = 0xB0,
     points_offset = 0x518B0,
+    encounter_deadline_offset = 0x399D8,
+    encounter_manager_rva = 0x276C348,
+    encounter_manager_count_offset = 0x934,
     candidate_pool_offset = 0x432F8,
     candidate_count_offset = 0x5188C,
     candidate_stride = 0xD8,
@@ -148,19 +152,20 @@ local function faction_name(count)
 end
 local function describe(points, original, valid, count, timers, pop, cfg,
                         guardforce, guardforce_original, faction)
-    local i38, i3c, i40, i44, group, desired = 0, 0, 0, 0, 0, 0
+    local i38, i3c, i40, i44, group, desired, override = 0, 0, 0, 0, 0, 0, -1
     if cfg then
-        i38, i3c, i40, i44, group, desired =
-            cfg.i38, cfg.i3c, cfg.i40, cfg.i44, cfg.group, cfg.desired
+        i38, i3c, i40, i44, group, desired, override =
+            cfg.i38, cfg.i3c, cfg.i40, cfg.i44, cfg.group, cfg.desired,
+            cfg.override or -1
     end
-    patch.detail = string.format('p=%.1f/%s gf=%.1f/%s f=%s c=%d/%d t=%d x=%d i=%.2f-%.2f/%.2f-%.2f g=%d d=%d l=vanilla',
+    patch.detail = string.format('p=%.1f/%s gf=%.1f/%s f=%s c=%d/%d t=%d x=%d i=%.2f-%.2f/%.2f-%.2f g=%d d=%d o=%.2f l=vanilla',
         points or 0,
         original and string.format('%.1f', original) or '-',
         guardforce or 0,
         guardforce_original and string.format('%.1f', guardforce_original) or '-',
         faction or 'unknown',
         valid or 0, count or 0, timers or 0, pop or 0,
-        i38, i3c, i40, i44, group, desired)
+        i38, i3c, i40, i44, group, desired, override)
 end
 local function retarget_table(api, director, table_bytes, rows, table_size)
     ffi = ffi or require('ffi')
@@ -273,6 +278,19 @@ end
 local function read_pop(api, director)
     local raw = api.read(director + patch.pop_offset, 4)
     return raw and u32(raw, 0) or 0
+end
+local function encounter_status(api, game, director)
+    local clock = api.pointer(api.read(game + patch.time_rva, 8))
+    local now_bytes = clock and api.read(clock + 0x18, 8)
+    local now = now_bytes and u64(now_bytes, 0)
+    local deadline_bytes = api.read(director + patch.encounter_deadline_offset, 8)
+    local deadline = deadline_bytes and u64(deadline_bytes, 0)
+    local delta = now and deadline
+        and (deadline - now) / patch.timer_units_per_second or -1
+    local manager = api.pointer(api.read(game + patch.encounter_manager_rva, 8))
+    local manager_bytes = manager and api.read(manager + patch.encounter_manager_count_offset, 4)
+    local manager_count = manager_bytes and u32(manager_bytes, 0) or 0
+    return string.format(' e=%.2f m=%d', delta, manager_count)
 end
 local function scale_candidate_weights(api, director)
     if not patch.template_bias_enabled then return 0, 0 end
@@ -560,7 +578,13 @@ local function scale_config(api, game, director)
     local override_target
     local state_key = tostring(address)
     local state = override_state[state_key]
-    if cfg.override > 0 then
+    if patch.force_override_to_base then
+        local points_bytes = api.read(director + patch.points_offset, 4)
+        local base_points = points_bytes and number(points_bytes, 0) or 0
+        if finite(base_points) and base_points > 0 then
+            override_target = base_points
+        end
+    elseif cfg.override > 0 then
         if state and near(cfg.override, state.applied) then
             override_target = state.applied
         else
@@ -586,6 +610,7 @@ local function scale_config(api, game, director)
     first = {
         i38 = t38, i3c = t3c, i40 = t40, i44 = t44,
         group = tgroup, desired = baseline.desired,
+        override = override_target or cfg.override,
     }
     return scaled, first, source .. '@' .. tostring(address)
 end
@@ -721,7 +746,8 @@ function patch.apply(api, game)
     local scaled_points = mission.points_applied or points
     describe(scaled_points, mission.points_original, valid, count, timers, pop_live, cfg_live,
         scaled_guardforce, mission.guardforce_original, faction)
-    patch.detail = patch.detail .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
+    patch.detail = patch.detail .. encounter_status(api, game, director)
+        .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
         .. (bias_reason and (':' .. bias_reason) or '')
         .. ' cfg=' .. tostring(cfg_reason)
     if configs > 0 then
