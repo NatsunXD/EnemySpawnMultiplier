@@ -45,6 +45,8 @@ local patch = {
     scheduler_b_rva = 0x276CA28,
     scheduler_b_offset = 0x1C,
     scheduler_flags = {0x5189C, 0x518A0, 0x518A4, 0x518A8},
+    probe_timer_offsets = {0x399D0, 0x399E8, 0x399F0, 0x3A510, 0x3A528, 0x3A530, 0x3A538},
+    probe_timers_enabled = false,
     candidate_pool_offset = 0x432F8,
     candidate_count_offset = 0x5188C,
     candidate_stride = 0xD8,
@@ -310,12 +312,27 @@ local function scheduler_status(api, game, director)
     for index, offset in ipairs(patch.scheduler_flags) do
         flags[index] = read_u32_at(api, director + offset) ~= 0 and 1 or 0
     end
-    return string.format(' e=%.2f m=%d a=%d b=%d pd=%.2f sd=%.2f fl=%d%d%d%d',
+    local text = string.format(' e=%.2f m=%d a=%d b=%d pd=%.2f sd=%.2f fl=%d%d%d%d',
         deadline_delta(api, director + patch.encounter_deadline_offset, now), lists,
         a, b,
         deadline_delta(api, director + patch.timer_offsets[2], now),
         deadline_delta(api, director + patch.timer_offsets[1], now),
         flags[1], flags[2], flags[3], flags[4])
+    if patch.probe_timers_enabled and now then
+        local parts = {}
+        for _, value in ipairs(patch.probe_timer_offsets) do
+            local bytes = api.read(director + value, 8)
+            local raw = bytes and u64(bytes, 0)
+            if raw then
+                local delta = (raw - now) / patch.timer_units_per_second
+                if delta > -3600 and delta < 3600 then
+                    parts[#parts + 1] = string.format('%x:%.1f', value, delta)
+                end
+            end
+        end
+        text = text .. ' T=' .. table.concat(parts, ',')
+    end
+    return text
 end
 local function scale_candidate_weights(api, director)
     if not patch.template_bias_enabled then return 0, 0 end

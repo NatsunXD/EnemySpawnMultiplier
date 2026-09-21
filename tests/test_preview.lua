@@ -11,6 +11,7 @@ patch.derive_override_from_base = false
 patch.force_override_to_base = true
 patch.encounter_deadline_enabled = true
 patch.encounter_max_interval = 2.0
+patch.probe_timers_enabled = true
 patch.guardforce_write_enabled = false
 patch.illuminate_guardforce_multiplier = 1.0
 patch.interval_mode = 'fixed'
@@ -209,6 +210,7 @@ assert(patch.detail:find('e=', 1, true) and patch.detail:find('m=', 1, true))
 assert(patch.detail:find('a=', 1, true) and patch.detail:find('b=', 1, true))
 assert(patch.detail:find('pd=', 1, true) and patch.detail:find('sd=', 1, true))
 assert(patch.detail:find('fl=', 1, true))
+assert(patch.detail:find(' T=', 1, true))
 assert(patch.detail:find('gf=600.0/600.0', 1, true))
 assert(patch.detail:find('i=0.00-0.10/0.00-0.10', 1, true))
 assert(patch.detail:find('g=100', 1, true))

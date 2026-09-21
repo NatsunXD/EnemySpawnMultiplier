@@ -74,7 +74,7 @@ adopt the faster v16 schedule.
 
 ## Preview profile: low Encounter / high timed patrol
 
-`data-v16.7-preview-low-budget-patrol` is a mutually exclusive preview package
+`data-v16.8-preview-low-budget-patrol` is a mutually exclusive preview package
 that tests whether pressure can be shifted away from Encounter waves toward the
 timed Patrol/Straggler paths:
 
@@ -128,6 +128,17 @@ Patrol/Straggler deadline deltas and the enable flags at
 `0x5189C/0x518A0/0x518A4/0x518A8` so a missing Patrol effect can be attributed
 to this gate rather than to the interval write.
 
+The v16.8 preview writes a timeline instead of replacing one snapshot: a sample
+line about every second, rotated at 4 MB. A v16.6 specimen taken in mission
+recorded `a=0 b=40 d=30 pd=-354.98 sd=-354.95 fl=0000 e=-429.30`, meaning the
+timed scheduler was disabled (`fl=0000`) and both timed deadlines were long
+expired. Neither an interval write nor a deadline clamp can change Patrol
+cadence while the branch is skipped, so the timeline is the minimum evidence
+needed to separate "interval ineffective" from "branch not running". The same
+build probes `0x399D0`, `0x399E8`, `0x399F0`, `0x3A510`, `0x3A528`, `0x3A530`
+and `0x3A538` read-only and prints the ones within an hour of the mission clock
+in `T=`.
+
 `cfg+0x50` is deliberately no longer scaled. Native function `0x9511F0` first
 checks the active component count against the scaled target, then rejects when
 `(T-A)+(B-A) >= 100`. Raising `T` delays the first exit but also increases the
@@ -179,10 +190,10 @@ headroom under the unchanged shared population checks.
 ## Diagnostics and validation
 
 The log revision is `data-v16-native`, `data-v16-light-medium`, or
-`data-v16.7-preview-low-budget-patrol`. `p=` reports
+`data-v16.8-preview-low-budget-patrol`. `p=` reports
 Encounter budget, `gf=` GuardForce current/original budget, `f=` detected
 faction, `c=` cap rows, `i=` scaled Straggler/Patrol intervals, `g=` group clamp,
-`d=` unchanged desired target, `o=` effective `cfg+0x78` override, `e=` seconds until the reinforcement cooldown, `m=` live Encounter manager count, `a=`/`b=` scheduling counters, `pd=`/`sd=` Patrol/Straggler deadline deltas, `fl=` scheduler enable flags, `t=` deadlines shortened on the latest check, `n=` skipped-but-not-fatal deadline note,
+`d=` unchanged desired target, `o=` effective `cfg+0x78` override, `e=` seconds until the reinforcement cooldown, `m=` live Encounter manager count, `a=`/`b=` scheduling counters, `pd=`/`sd=` Patrol/Straggler deadline deltas, `fl=` scheduler enable flags, `T=` probed director timer offsets within an hour of the mission clock, `t=` deadlines shortened on the latest check, `n=` skipped-but-not-fatal deadline note,
 `w=` biased/available candidates or its fallback reason, and `cfg=` the active
 resolver result. `l=vanilla` confirms executable population branches are unchanged.
 
