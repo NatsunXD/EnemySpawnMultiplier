@@ -331,10 +331,17 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Preview - `data-v16.12-preview-low-budget-patrol`
+### Preview - `data-v16.13-preview-low-budget-patrol`
 
-Reinforcement budget `0.2x`, and `cfg+0x78` is forced to the already-scaled
+Reinforcement budget `0.4x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
+
+The budget line has moved 0.1x -> 0.2x -> 0.4x across preview revisions. Only the
+multiplier changes; the write path, the override forcing and the idempotence state
+are the same in all three. Budget is a point total spent on Encounter template
+entries rather than a unit count, so the observed effect of a budget change is a
+change in how many entries a wave can afford, not a proportional change in
+visible units.
 
 Four curves are scaled: `0x164` encounter cooldown `3.0x`, `0x1A0` patrol count
 `3.0x`, `0x1DC` patrol spawn cooldown `3.0x`, and `0x3F8` units per patrol wave
@@ -422,13 +429,23 @@ gameplay payload data/9ba626afa44a3aa3.patch_0
 SHA-256 3000539AB5260591891E095C669B976AF1408508C38D95E534DC978AEF1B6170
 ```
 
-The current preview build is:
+The build that confirmed the 10x patrol squad size and the heavy-tier candidate
+weighting, and therefore the current line of preview tuning, is:
 
 ```text
 releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.12-preview.zip
 SHA-256 E7CF302E99566B30E97CE9C971A3BB34C4E33E40E1A227015250F6A1F6B3CFE2
 gameplay payload data/9ba626afa44a3aa3.patch_0
 SHA-256 391B0EF4DDEB27D918999004489EA80674611EE5F40DF2BF67D91814D9D9C3E7
+```
+
+The current preview build raises only the budget to `0.4x`:
+
+```text
+releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip
+SHA-256 3AE8D0AEEB52CFB6BC04A23AFA858F9E73AAA5CF3B5587330BB0F6EF0A62C119
+gameplay payload data/9ba626afa44a3aa3.patch_0
+SHA-256 5B3FE6DC38239E84EBCB41B3995BDCB3E6C02C88445B713DAF3ECBE0CE5F155A
 ```
 
 The v16 pair carries no curve scaling, no traveler write, no deadline clamp and
@@ -444,9 +461,12 @@ bytes and the shipped bytes are the same file. The gameplay payload hash is
 recorded separately so a future rebuild that changes only packaging metadata can
 still be compared against what was actually played.
 
-Live confirmation covers the reinforcement cooldown, the patrol refresh cooldown
-and the direction of the `_rate_` convention. Not yet exercised live: the 10x
-patrol squad size, the heavy-tier candidate weighting, Automaton and Illuminate,
-the Illuminate GuardForce `0.25x` path, mission-to-mission transitions inside one
-process, and host versus solo differences. `runtime_verified` stays `false` in
-the manifests until those are covered.
+Live confirmation now covers: the enemy reinforcement cooldown, the patrol refresh
+cooldown, the direction of the `_rate_` convention, the 10x patrol squad size via
+`cfg+0x3F8`, and the heavy-tier candidate weighting with the `0.25/1.0/4.0`
+density bands. All were on the Terminid front.
+
+Not yet exercised live: the `0.4x` budget step, Automaton and Illuminate, the
+Illuminate GuardForce `0.25x` path, mission-to-mission transitions inside one
+process, and host versus solo differences. `runtime_verified` stays `false` in the
+manifests until those are covered.

@@ -1,69 +1,66 @@
-Enemy Spawn Multiplier - v16 and v16.12 preview packages
+Enemy Spawn Multiplier - v16 and v16.13 preview packages
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
 - Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
 - Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
-- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.12-preview.zip
+- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. All packages use the same resource ID
 and cannot be combined.
 
-What v16.12 changes
--------------------
+v16.13
+------
 
-Three settings moved at once:
+Reinforcement budget raised from 0.2x to 0.4x. Everything else is carried over
+from v16.12, which was confirmed in game:
 
-1. Reinforcement budget 0.1x -> 0.2x. The effective cfg+0x78 override is still
-   forced to the already-scaled director base, so a positive native override
-   cannot bypass the reduction.
+- Reinforcement cooldown clamped at 2 s via director+0x399D8.
+- Patrol spawn cooldown 3x, patrol count 3x (cfg+0x1DC, cfg+0x1A0).
+- Patrol squad size 10x via cfg+0x3F8
+  travelers_max_unit_count_multiplier. game.dll+0x943E40 computes a patrol wave
+  as round(base_units * that curve).
+- Encounter templates biased toward heavier squads: candidates are ranked by cost
+  per planned unit, the cheapest half drops to 0.25x weight, the middle 30% stays
+  at 1.0x, and the costliest 20% rises to 4.0x.
+- The effective cfg+0x78 override is forced to the already-scaled director base,
+  so a positive native override cannot bypass the budget reduction.
+- Timed Patrol/Straggler intervals pinned at 0.0-0.1 s, nonzero per-type caps and
+  the group clamp at 10x, GuardForce/static defenders fully native, no
+  executable-code changes.
 
-2. Patrol squad size 3x -> 10x via cfg+0x3F8
-   travelers_max_unit_count_multiplier. game.dll+0x943E40 computes a patrol
-   wave as round(base_units * that curve), so this is the lever that changes how
-   many units appear per patrol.
+What to expect from 0.4x
+------------------------
 
-3. Encounter templates now favour heavier squads. Candidates are ranked by cost
-   per planned unit; the cheapest half is suppressed to 0.25x weight, the middle
-   30% is left at 1.0x, and the costliest 20% is boosted to 4.0x. Cost per
-   planned unit is the closest available proxy for armour class, so the expensive
-   end is where the heavy units live.
+The budget is a point total spent on Encounter template entries, not a unit count,
+and one template entry can carry several units. Going 0.2x -> 0.4x therefore
+roughly doubles the points available per wave, which should mean more template
+entries per wave and/or larger entries, rather than a simple doubling of visible
+units.
 
-Unchanged: reinforcement cooldown clamp at 2 s, patrol spawn cooldown 3x, patrol
-count 3x, timed Patrol/Straggler intervals pinned at 0.0-0.1 s, nonzero per-type
-caps and group clamp at 10x, GuardForce/static defenders fully native, no
-executable-code changes.
+Two interactions to watch:
 
-Interactions worth knowing
---------------------------
-
-Budget and squad size pull in opposite directions. The 0.2x budget buys fewer
-composition points per wave, so each wave spends its points on fewer template
-entries - but each entry is now up to 10x larger and biased toward expensive
-templates. The net visible count is not simply 0.2x times 10x; observe it rather
-than predict it.
-
-A 10x patrol wave can also reach the shared native population gate sooner.
-Position queries, the 96-slot queue, the effective-70 term and the 448 component
-cap all still apply. If reinforcement waves start getting rejected once many
-patrols are alive, that gate is the reason, not the curve writes.
-
-Reversal is cheap: set modifier_travelers_max_unit back to 3.0 or 1.0, or disable
-modifier_scale_enabled, and rebuild.
+- Each wave now has more points to spend, so the heavy-tier bias (4.0x on the
+  costliest 20%) has more room to actually select expensive templates. Higher
+  budget and heavy bias reinforce each other here, unlike the 0.2x build where
+  points were scarce.
+- More/larger waves reach the shared native population gate sooner. Position
+  queries, the 96-slot queue, the effective-70 term and the 448 component cap all
+  still apply. If waves start getting rejected under sustained pressure, that gate
+  is the reason, not the curve writes.
 
 Reading the log
 ---------------
 
 - p=   Encounter budget current/original. With a native 600 this now reads
-       120.0/600.0.
-- o=   effective cfg+0x78 override. Expect 120.00.
+       240.0/600.0.
+- o=   effective cfg+0x78 override. Expect 240.00.
 - ms=  applied curve scales, expected 3.0/3.0/3.0/10.0.
 - mv=  live head float of each scaled curve. With a baseline of 1.0 this reads
        3.00/3.00/3.00/10.00.
-- w=   biased/available candidates. With heavy bias enabled the first number is
-       the candidate count that was reweighted.
+- w=   biased/available candidates, or the fallback reason.
 - e=, a=, b=, d=, fl=  reinforcement deadline and timed-scheduler gate inputs.
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy

@@ -5,8 +5,8 @@ local create_api = assert(loadfile(source .. '/windows_api.lua'))()
 local patch = assert(loadfile(source .. '/spawn_patch.lua'))()
 
 -- Mirror the overrides emitted by scripts/module.py for the preview variant.
-patch.budget_multiplier = 0.2
-patch.budget_override_multiplier = 0.2
+patch.budget_multiplier = 0.4
+patch.budget_override_multiplier = 0.4
 patch.derive_override_from_base = false
 patch.force_override_to_base = true
 patch.encounter_deadline_enabled = true
@@ -233,16 +233,16 @@ put_u64(director + patch.timer_offsets[2], 15000000)
 put_u64(director + patch.encounter_deadline_offset, 61000000)
 local ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
-assert(approx(get_f32(director + patch.points_offset), 20))
+assert(approx(get_f32(director + patch.points_offset), 40))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 20))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 40))
 assert(get_u32(entries + patch.max_offset) == 10)
 assert(get_u64(director + patch.timer_offsets[1]) == 1100000)
 assert(get_u64(director + patch.timer_offsets[2]) == 1100000)
 assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
-assert(patch.detail:find('p=20.0/100.0', 1, true))
-assert(patch.detail:find('o=20.00', 1, true))
+assert(patch.detail:find('p=40.0/100.0', 1, true))
+assert(patch.detail:find('o=40.00', 1, true))
 assert(patch.detail:find('e=', 1, true) and patch.detail:find('m=', 1, true))
 assert(patch.detail:find('a=', 1, true) and patch.detail:find('b=', 1, true))
 assert(patch.detail:find('pd=', 1, true) and patch.detail:find('sd=', 1, true))
@@ -264,12 +264,12 @@ assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 10.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 10.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 30))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 60))
-pass('preview lowers Encounter to 0.2x and clamps the reinforcement cooldown to two seconds')
+pass('preview lowers Encounter to 0.4x and clamps the reinforcement cooldown to two seconds')
 
 local settled_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == settled_writes)
-assert(approx(get_f32(director + patch.points_offset), 20))
+assert(approx(get_f32(director + patch.points_offset), 40))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
 assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
@@ -299,18 +299,18 @@ pass('cooldown clamp leaves due deadlines alone and reports an unwritable field'
 
 -- A strict preview ignores the native override value and forces the resolved
 -- config to the already-scaled director base, preventing a positive override
--- from bypassing the 0.2x budget.
+-- from bypassing the 0.4x budget.
 director_present = false
 assert(patch.apply(api, game))
 mission(faction_caps(45, 2000), 100, 600)
 fill_config(20, 40, 8, 14, 10, 30, 20)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 20))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 40))
 local override_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == override_writes)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 20))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 40))
 pass('strict preview forces the effective override to the scaled base and remains idempotent')
 
 -- Difficulty modifier blocks must scale from the stored baseline. A second pass
@@ -350,7 +350,7 @@ fill_config(0, 0.1, 0, 0.1, 100, 30, -1)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
 assert_config(0, 0.1, 0, 0.1, 100, 30)
-assert(approx(get_f32(director + patch.points_offset), 20))
+assert(approx(get_f32(director + patch.points_offset), 40))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 pass('preview does not stack on an already-scaled config')
 
