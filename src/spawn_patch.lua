@@ -31,6 +31,7 @@ local patch = {
     modifier_encounter_cooldown = 0,   -- cfg+0x164 encounter_cooldown_rate_modifier
     modifier_patrol_count = 0,         -- cfg+0x1A0 patrol_count_max_modifier
     modifier_patrol_cooldown = 0,      -- cfg+0x1DC patrol_spawn_cooldown_rate_modifier
+    modifier_travelers_max_unit = 0,   -- cfg+0x3F8 travelers_max_unit_count_multiplier
     modifier_state_key = 'none',
     guardforce_write_enabled = true,
     template_bias_enabled = false,
@@ -423,16 +424,21 @@ local function scale_candidate_weights(api, director)
     return #candidates, count
 end
 local MODIFIER_BLOCK_SIZE = 15
+-- 0x3F8 is the only patrol-specific size lever: game.dll+0x943E40 computes the
+-- traveler unit count as round(base_count * cfg[curve_index + 0x3F8]). The other
+-- two patrol curves control how many patrols exist and how often they appear.
 local MODIFIER_BLOCKS = {
     {offset = 0x164, key = 'encounter_cooldown', label = 'spawn_modifier_encounter_cooldown'},
     {offset = 0x1a0, key = 'patrol_count', label = 'spawn_modifier_patrol_count'},
     {offset = 0x1dc, key = 'patrol_cooldown', label = 'spawn_modifier_patrol_cooldown'},
+    {offset = 0x3f8, key = 'travelers_max_unit', label = 'spawn_modifier_travelers_max_unit'},
 }
 local function modifier_scales()
     return {
         encounter_cooldown = patch.modifier_encounter_cooldown,
         patrol_count = patch.modifier_patrol_count,
         patrol_cooldown = patch.modifier_patrol_cooldown,
+        travelers_max_unit = patch.modifier_travelers_max_unit,
     }
 end
 local function scale_modifier_block(api, address, offset, scale, label)
@@ -759,8 +765,9 @@ local function scale_config(api, game, director)
             parts[#parts + 1] = string.format('%.2f', head)
         end
         patch.modifier_detail = ' mv=' .. table.concat(parts, '/')
-            .. ' ms=' .. string.format('%.1f/%.1f/%.1f',
-                scales.encounter_cooldown, scales.patrol_count, scales.patrol_cooldown)
+            .. ' ms=' .. string.format('%.1f/%.1f/%.1f/%.1f',
+                scales.encounter_cooldown, scales.patrol_count,
+                scales.patrol_cooldown, scales.travelers_max_unit)
     end
     local override_target
     local state_key = tostring(address)

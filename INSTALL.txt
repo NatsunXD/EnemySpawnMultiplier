@@ -1,79 +1,74 @@
-Enemy Spawn Multiplier - v16 and v16.10 preview packages
+Enemy Spawn Multiplier - v16 and v16.11 preview packages
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
 - Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
 - Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
-- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.10-preview.zip
+- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.11-preview.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. All packages use the same resource ID
 and cannot be combined.
 
-What the captures established
------------------------------
+What changed in v16.11
+----------------------
 
-Four read-only captures of unmodified missions settled these points:
+v16.10 shortened the enemy reinforcement cooldown and the patrol refresh cooldown
+and both were confirmed in game, but patrol squads stayed the same size. The
+cause was that the three curves v16.10 scaled are a cooldown, a cooldown rate,
+and a patrol *count* - none of them is units per squad.
 
-1. The spawn-config row at director+0x519A4 is HiveMindComponent (typelib size
-   1080 = 0x438). MissionDifficultySettings starts at +0x88 and ends at +0x434.
-2. Vanilla TravelerSettings spawn-point cooldown is 5 / 10 seconds on this
-   build, not the documented 30 / 60. The v16.9 preview changed it to 2 / 5 and
-   patrol cadence did not move, so that field is not the patrol lever.
-3. All four scheduler enable flags (0x5189C/0x518A0/0x518A4/0x518A8) have no
-   writer anywhere in game.dll. The timed Patrol/Straggler scheduler is
-   unreachable, which is why editing cfg+0x38..0x44 never changed anything.
-4. The reinforcement deadline at director+0x399D8 is written only once, from the
-   mission-init path at game.dll+0x94CCE8, and then only drifts.
+Patrol squad size comes from a separate patrol-only curve:
 
-v16.10 uses the difficulty modifier curves
-------------------------------------------
+    game.dll+0x943E40:
+        xmm7 = cfg[curve_index + 0x3F8]      travelers_max_unit_count_multiplier
+        xmm6 = cfg[curve_index + 0x3BC]      travelers_waves_cooldown_multiplier
+        count = round(base_units * xmm7)
+        cooldown_seconds -> [rsi]
 
-game.dll+0xD49E70 blends the MissionDifficultySettings modifier curves for the
-active difficulty and progress. Each curve is 15 floats. v16.10 multiplies three
-of them by 3.0 inside the same 0x438 row the mod already writes:
+v16.11 therefore also multiplies cfg+0x3F8 by 3.0. That is the only curve the
+game uses to scale how many units a patrol wave contains.
 
-- cfg+0x164  encounter_cooldown_rate_modifier      -> enemy reinforcement cooldown
-- cfg+0x1A0  patrol_count_max_modifier             -> how many patrols may exist
-- cfg+0x1DC  patrol_spawn_cooldown_rate_modifier   -> patrol spawn cooldown
+Full curve set now scaled by 3.0 in this profile:
 
-These three are the only fields found so far whose names match the two requested
-behaviours exactly. The write path is the same checked, readback, idempotent
-path used everywhere else, and each block stores its own baseline so a second
-pass cannot stack. If the game re-blends a block for a new difficulty, the new
-native value becomes the baseline and is scaled once.
+- cfg+0x164  encounter_cooldown_rate_modifier       enemy reinforcement cooldown
+- cfg+0x1A0  patrol_count_max_modifier              how many patrols may exist
+- cfg+0x1DC  patrol_spawn_cooldown_rate_modifier    patrol spawn cooldown
+- cfg+0x3F8  travelers_max_unit_count_multiplier    units per patrol wave
 
-Unchanged from v16.9: the reinforcement budget stays at 0.1x with the effective
-cfg+0x78 override forced to the scaled base, the timed Patrol/Straggler
-intervals stay at 0.0-0.1 seconds (inert but harmless), nonzero per-type caps and
-the group clamp stay at 10x, and GuardForce/static defenders stay fully native.
+Each block keeps its own baseline so a second pass cannot stack, and if the game
+re-blends a curve for a new difficulty the freshly blended native value becomes
+the new baseline and is scaled once from there.
 
-Direction caveat
-----------------
+Unchanged: reinforcement budget 0.1x with the effective cfg+0x78 override forced
+to the scaled base, timed Patrol/Straggler intervals at 0.0-0.1 seconds (inert on
+this build but correct if the branch is ever reached), nonzero per-type caps and
+the group clamp at 10x, GuardForce/static defenders fully native.
 
-Field names containing _rate_ are treated as frequency multipliers, so a larger
-value means a shorter cooldown. The difficulty ramps support this reading: the
-_rate_ curves increase as difficulty/progress rises, which matches "more enemy
-pressure later". The plain global_spawner_cooldown_modifier instead decreases
-(1.0 -> 0.55), which matches a duration multiplier.
+Side effect to expect
+---------------------
 
-If this reading is inverted, patrols and encounters will become roughly three
-times slower instead of faster. That is a clearly visible outcome, so one test
-settles the direction either way.
+travelers_max_unit_count_multiplier is patrol-specific, so it should raise only
+patrol squad size. If you also want outpost or guard-force squads larger, that is
+a different curve:
+
+- cfg+0x290  spawner_spawn_count_modifier          units per spawner wave
+- cfg+0x218  spawner_queue_limit_modifier          production queue depth
+- cfg+0x2CC  spawner_spawn_count_minimum_modifier  minimum units per wave
+
+Those apply to every spawner, not only patrols, which is why they are not in the
+preview yet.
 
 Reading the log
 ---------------
 
-- ms=  the applied scale triple, expected 3.0/3.0/3.0.
-- mv=  the live first float of each scaled block after the write. For a
-       baseline of 1.0 this reads 3.00/3.00/3.00.
+- mv=  live head float of each scaled curve after the write; with a baseline of
+       1.0 and a scale of 3.0 this reads 3.00/3.00/3.00/3.00.
+- ms=  the applied scale quadruple, expected 3.0/3.0/3.0/3.0.
 - p=   Encounter budget current/original, expected 60.0/600.0.
 - o=   effective cfg+0x78 override, expected 60.00.
-- tv=  traveler spawn-point cooldown, now left at the native 30-60 test value.
-- e=   seconds until the reinforcement deadline at 0x399D8.
-- a=, b=, d=  the timed scheduler gate inputs.
-- fl=  scheduler enable flags, expected 0000 on this build.
+- e=, a=, b=, d=, fl=  the reinforcement deadline and timed-scheduler gate inputs.
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy
 the remaining mods.

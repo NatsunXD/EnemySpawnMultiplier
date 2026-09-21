@@ -102,14 +102,16 @@ out 5 + 4 + 1 + 5. `game.dll+0xD49E70..0xD4B67A` is the evaluator: it blends
 those curves between two source rows with `mulss`/`addss` weighted sums, so the
 live values are per-difficulty and per-progress, not constants.
 
-The three curves below were identified by name, then scaled by `3.0` in the
-preview profile, and the two cooldown effects were then confirmed in game:
+The four curves below were identified by name, then scaled by `3.0` in the
+preview profile. The two cooldown effects were confirmed in game first; the
+patrol-size curve was added afterwards and is documented in section 4.5.
 
 | Config offset | Field | Effect |
 |---|---|---|
 | `cfg+0x164` | `encounter_cooldown_rate_modifier` | enemy reinforcement cooldown |
 | `cfg+0x1A0` | `patrol_count_max_modifier` | how many patrols may exist |
 | `cfg+0x1DC` | `patrol_spawn_cooldown_rate_modifier` | patrol spawn cooldown |
+| `cfg+0x3F8` | `travelers_max_unit_count_multiplier` | units per patrol wave |
 
 The remaining curves, same block layout, are available but unused:
 
@@ -138,7 +140,78 @@ same intent - more pressure later - under the two different conventions.
 The reading was confirmed in game: scaling the three `_rate_`/count curves by 3.0
 produced a clearly shorter reinforcement cooldown and patrol refresh cooldown.
 
-### 4.4 Cap rows and group clamp
+### 4.4 Every curve block is three indexed arrays
+
+Each 60-byte curve is read by a dedicated getter with the same shape, for example
+the queue-limit getter at `0x7F0CB0` and the spawn-count getter at `0x7F0F20`:
+
+```asm
+call 0x501490                      ; resolve the active 0x438 config row
+mov  rbx, rax
+call 0x94de00                      ; -> progression index 0..4
+mulss xmm6, [rbx + idx*4 + BASE]        ; array A, progress
+call 0x94de80                      ; -> player-count / influence index 0..4
+mulss xmm6, [rbx + idx*4 + BASE+0x14]   ; array B, influence
+mov  eax, [difficulty]             ; difficulty 1..7
+mulss xmm6, [rbx + idx*4 + BASE+0x28]   ; array C, difficulty
+```
+
+`0x94DE00` reads `mission_progression_steps` (the first five floats of
+`MissionDifficultySettings` at `cfg+0x88`) and returns the first step greater than
+the live progress. `0x94DE80` compares `cfg+0x9C + i*4` against
+`director+0x51948` and returns the first qualifying index. Both can return `-1`,
+which the getters treat as "apply no multiplier".
+
+So a block is three 5-float arrays selected by progress, player count and
+difficulty, plus a fixed index used in one mission mode. A 60-byte block is
+therefore fifteen floats; the typelib's 20/16/4/20 byte split is a packaging
+artefact of the same fifteen values.
+
+This matters when editing a curve: the value you scale is only the one for the
+currently selected index. Scaling the whole 60-byte block is what the preview
+does, so every progression step and difficulty ends up scaled.
+
+### 4.5 Patrol squad size
+
+The getter at `game.dll+0x943E40` is patrol-specific and computes both patrol
+outputs in one pass:
+
+```asm
+mulss xmm7, [rbx + idx*4 + 0x420]   ; travelers_max_unit_count, index +0x28
+movss [rsi], xmm6                   ; travelers_waves_cooldown -> parameter
+cvtsi2ss xmm1, rax                  ; base unit count for this branch
+mulss xmm1, xmm7                    ; x base_count * multiplier
+cvttss2si ecx, xmm1                 ; round, then store as int
+```
+
+The result is `round(base_units * travelers_max_unit_count_multiplier)` where
+`base_units` comes from `rdi+0x2EC`/`0x2F0`/`0x2F4`, chosen by the branch id at
+`director+0x518BC` (2, 4 or 8). It also multiplies the cooldown by
+`travelers_waves_cooldown_multiplier` (`cfg+0x3BC`) and by a per-branch float at
+`rdi+0x2E0`/`0x2E4`/`0x2E8`.
+
+That is why scaling `patrol_count_max_modifier` did not change squad size: it
+selects how many patrols exist, not how many units each one carries. The unit
+count is governed by `cfg+0x3F8` alone.
+
+Measured vanilla patrol increments were 11-12 units per event in all three
+captures, which is the native `base_units * multiplier` result.
+
+### 4.6 Outpost and guard-force squad size
+
+Non-patrol spawners use the generic spawner getters instead, and those were left
+untouched:
+
+- `cfg+0x290` `spawner_spawn_count_modifier` - units per spawner wave
+  (`AiSpawnerComponent.spawn_count` at component `+0x8C`)
+- `cfg+0x2CC` `spawner_spawn_count_minimum_modifier` - minimum units per wave
+- `cfg+0x218` `spawner_queue_limit_modifier` - production queue depth
+  (`AiSpawnerComponent.production_queue_limit` at `+0x88`)
+
+Unlike `cfg+0x3F8`, these apply to every spawner type, so scaling them would also
+change outposts and guard forces. They are deliberately not in the preview.
+
+### 4.7 Cap rows and group clamp
 
 `director+0x660` points at an object whose first `0xB0` bytes are real state and
 are consumed whole by native function `0x93F0E0`. The object's rows sit after
@@ -279,7 +352,7 @@ second and rotated at 4 MB.
 | `g=` | group clamp, `d=` desired target |
 | `o=` | effective `cfg+0x78` override |
 | `tv=` | `TravelerSettings` spawn-point cooldown pair |
-| `ms=` | applied difficulty-curve scale triple |
+| `ms=` | applied difficulty-curve scale quadruple |
 | `mv=` | live head float of each scaled curve after the write |
 | `e=` | seconds until `0x399D8`; `pd=`/`sd=` Patrol/Straggler deadline deltas |
 | `a=`/`b=` | the two scheduling counters that gate `0x9511F0` |

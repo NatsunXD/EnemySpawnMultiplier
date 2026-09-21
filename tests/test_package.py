@@ -39,14 +39,14 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v16.10-preview-low-budget-patrol': 'v16.10-preview',
+            'data-v16.11-preview-low-budget-patrol': 'v16.11-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v16.10-preview-low-budget-patrol':
+        if provenance['revision'] == 'data-v16.11-preview-low-budget-patrol':
             assert change['budget_multiplier'] == 0.1
             assert change['budget_override_multiplier'] == 0.1
             assert change['derive_override_from_base'] is False
@@ -60,10 +60,13 @@ def main():
             assert change['modifier_scale_enabled'] is True
             assert change['modifier_scales'] == {'encounter_cooldown': 3.0,
                                                  'patrol_count': 3.0,
-                                                 'patrol_cooldown': 3.0}
+                                                 'patrol_cooldown': 3.0,
+                                                 'travelers_max_unit': 3.0}
             assert change['modifier_blocks']['encounter_cooldown_rate'] == '0x164'
             assert change['modifier_blocks']['patrol_count_max'] == '0x1A0'
             assert change['modifier_blocks']['patrol_spawn_cooldown_rate'] == '0x1DC'
+            assert change['hive_mind_config']['travelers_max_unit_count_multiplier'] == '0x3F8'
+            assert change['hive_mind_config']['travelers_getter_rva'] == '0x943E40'
             assert change['modifier_blocks']['block_floats'] == 15
             assert change['modifier_blocks']['evaluator_rva'] == '0xD49E70'
             assert change['hive_mind_config']['traveler_spawn_point_cooldown'] == ['0x0C', '0x10']
