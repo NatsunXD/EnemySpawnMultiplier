@@ -1,74 +1,70 @@
-Enemy Spawn Multiplier - v16 and v16.11 preview packages
+Enemy Spawn Multiplier - v16 and v16.12 preview packages
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
 - Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
 - Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
-- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.11-preview.zip
+- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.12-preview.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. All packages use the same resource ID
 and cannot be combined.
 
-What changed in v16.11
-----------------------
+What v16.12 changes
+-------------------
 
-v16.10 shortened the enemy reinforcement cooldown and the patrol refresh cooldown
-and both were confirmed in game, but patrol squads stayed the same size. The
-cause was that the three curves v16.10 scaled are a cooldown, a cooldown rate,
-and a patrol *count* - none of them is units per squad.
+Three settings moved at once:
 
-Patrol squad size comes from a separate patrol-only curve:
+1. Reinforcement budget 0.1x -> 0.2x. The effective cfg+0x78 override is still
+   forced to the already-scaled director base, so a positive native override
+   cannot bypass the reduction.
 
-    game.dll+0x943E40:
-        xmm7 = cfg[curve_index + 0x3F8]      travelers_max_unit_count_multiplier
-        xmm6 = cfg[curve_index + 0x3BC]      travelers_waves_cooldown_multiplier
-        count = round(base_units * xmm7)
-        cooldown_seconds -> [rsi]
+2. Patrol squad size 3x -> 10x via cfg+0x3F8
+   travelers_max_unit_count_multiplier. game.dll+0x943E40 computes a patrol
+   wave as round(base_units * that curve), so this is the lever that changes how
+   many units appear per patrol.
 
-v16.11 therefore also multiplies cfg+0x3F8 by 3.0. That is the only curve the
-game uses to scale how many units a patrol wave contains.
+3. Encounter templates now favour heavier squads. Candidates are ranked by cost
+   per planned unit; the cheapest half is suppressed to 0.25x weight, the middle
+   30% is left at 1.0x, and the costliest 20% is boosted to 4.0x. Cost per
+   planned unit is the closest available proxy for armour class, so the expensive
+   end is where the heavy units live.
 
-Full curve set now scaled by 3.0 in this profile:
+Unchanged: reinforcement cooldown clamp at 2 s, patrol spawn cooldown 3x, patrol
+count 3x, timed Patrol/Straggler intervals pinned at 0.0-0.1 s, nonzero per-type
+caps and group clamp at 10x, GuardForce/static defenders fully native, no
+executable-code changes.
 
-- cfg+0x164  encounter_cooldown_rate_modifier       enemy reinforcement cooldown
-- cfg+0x1A0  patrol_count_max_modifier              how many patrols may exist
-- cfg+0x1DC  patrol_spawn_cooldown_rate_modifier    patrol spawn cooldown
-- cfg+0x3F8  travelers_max_unit_count_multiplier    units per patrol wave
+Interactions worth knowing
+--------------------------
 
-Each block keeps its own baseline so a second pass cannot stack, and if the game
-re-blends a curve for a new difficulty the freshly blended native value becomes
-the new baseline and is scaled once from there.
+Budget and squad size pull in opposite directions. The 0.2x budget buys fewer
+composition points per wave, so each wave spends its points on fewer template
+entries - but each entry is now up to 10x larger and biased toward expensive
+templates. The net visible count is not simply 0.2x times 10x; observe it rather
+than predict it.
 
-Unchanged: reinforcement budget 0.1x with the effective cfg+0x78 override forced
-to the scaled base, timed Patrol/Straggler intervals at 0.0-0.1 seconds (inert on
-this build but correct if the branch is ever reached), nonzero per-type caps and
-the group clamp at 10x, GuardForce/static defenders fully native.
+A 10x patrol wave can also reach the shared native population gate sooner.
+Position queries, the 96-slot queue, the effective-70 term and the 448 component
+cap all still apply. If reinforcement waves start getting rejected once many
+patrols are alive, that gate is the reason, not the curve writes.
 
-Side effect to expect
----------------------
-
-travelers_max_unit_count_multiplier is patrol-specific, so it should raise only
-patrol squad size. If you also want outpost or guard-force squads larger, that is
-a different curve:
-
-- cfg+0x290  spawner_spawn_count_modifier          units per spawner wave
-- cfg+0x218  spawner_queue_limit_modifier          production queue depth
-- cfg+0x2CC  spawner_spawn_count_minimum_modifier  minimum units per wave
-
-Those apply to every spawner, not only patrols, which is why they are not in the
-preview yet.
+Reversal is cheap: set modifier_travelers_max_unit back to 3.0 or 1.0, or disable
+modifier_scale_enabled, and rebuild.
 
 Reading the log
 ---------------
 
-- mv=  live head float of each scaled curve after the write; with a baseline of
-       1.0 and a scale of 3.0 this reads 3.00/3.00/3.00/3.00.
-- ms=  the applied scale quadruple, expected 3.0/3.0/3.0/3.0.
-- p=   Encounter budget current/original, expected 60.0/600.0.
-- o=   effective cfg+0x78 override, expected 60.00.
-- e=, a=, b=, d=, fl=  the reinforcement deadline and timed-scheduler gate inputs.
+- p=   Encounter budget current/original. With a native 600 this now reads
+       120.0/600.0.
+- o=   effective cfg+0x78 override. Expect 120.00.
+- ms=  applied curve scales, expected 3.0/3.0/3.0/10.0.
+- mv=  live head float of each scaled curve. With a baseline of 1.0 this reads
+       3.00/3.00/3.00/10.00.
+- w=   biased/available candidates. With heavy bias enabled the first number is
+       the candidate count that was reweighted.
+- e=, a=, b=, d=, fl=  reinforcement deadline and timed-scheduler gate inputs.
 
 To uninstall, close the game, disable this mod, purge deployment, and redeploy
 the remaining mods.

@@ -503,11 +503,18 @@ local function read_config(api, address)
     if not bytes or #bytes < 0x1c then return nil end
     local override_bytes = api.read(address + patch.cfg_override_offset, 4)
     if not override_bytes then return nil end
+    -- The traveler pair is only read for diagnostics unless the profile actually
+    -- writes it, so a build that never touches these fields keeps its old
+    -- accept/reject behaviour exactly.
+    local traveler_min, traveler_max = 0, 0
     local traveler_bytes = api.read(address + 0x0c, 8)
-    if not traveler_bytes then return nil end
+    if traveler_bytes then
+        local low, high = number(traveler_bytes, 0), number(traveler_bytes, 4)
+        if finite(low) and finite(high) then traveler_min, traveler_max = low, high end
+    end
     local cfg = {
-        traveler_min = number(traveler_bytes, 0),
-        traveler_max = number(traveler_bytes, 4),
+        traveler_min = traveler_min,
+        traveler_max = traveler_max,
         i38 = number(bytes, 0),
         i3c = number(bytes, 4),
         i40 = number(bytes, 8),
@@ -517,10 +524,11 @@ local function read_config(api, address)
         override = number(override_bytes, 0),
     }
     if not (finite(cfg.i38) and finite(cfg.i3c) and finite(cfg.i40) and finite(cfg.i44)
-        and finite(cfg.override) and finite(cfg.traveler_min) and finite(cfg.traveler_max)) then
+        and finite(cfg.override)) then
         return nil
     end
-    if cfg.traveler_min < 0 or cfg.traveler_max < 0 or cfg.traveler_min > cfg.traveler_max then
+    if patch.traveler_cooldown_enabled
+        and (cfg.traveler_min < 0 or cfg.traveler_max < 0 or cfg.traveler_min > cfg.traveler_max) then
         return nil
     end
     if patch.allow_zero_interval_min then

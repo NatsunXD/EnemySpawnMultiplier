@@ -39,16 +39,16 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v16.11-preview-low-budget-patrol': 'v16.11-preview',
+            'data-v16.12-preview-low-budget-patrol': 'v16.12-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v16.11-preview-low-budget-patrol':
-            assert change['budget_multiplier'] == 0.1
-            assert change['budget_override_multiplier'] == 0.1
+        if provenance['revision'] == 'data-v16.12-preview-low-budget-patrol':
+            assert change['budget_multiplier'] == 0.2
+            assert change['budget_override_multiplier'] == 0.2
             assert change['derive_override_from_base'] is False
             assert change['force_override_to_base'] is True
             assert change['encounter_deadline_offset'] == '0x399D8'
@@ -61,10 +61,14 @@ def main():
             assert change['modifier_scales'] == {'encounter_cooldown': 3.0,
                                                  'patrol_count': 3.0,
                                                  'patrol_cooldown': 3.0,
-                                                 'travelers_max_unit': 3.0}
+                                                 'travelers_max_unit': 10.0}
             assert change['modifier_blocks']['encounter_cooldown_rate'] == '0x164'
             assert change['modifier_blocks']['patrol_count_max'] == '0x1A0'
             assert change['modifier_blocks']['patrol_spawn_cooldown_rate'] == '0x1DC'
+            assert change['template_bias'] == 'relative_cost_per_unit'
+            assert change['template_weight_multipliers'] == {'light': 0.25,
+                                                             'medium': 1.0,
+                                                             'heavy': 4.0}
             assert change['hive_mind_config']['travelers_max_unit_count_multiplier'] == '0x3F8'
             assert change['hive_mind_config']['travelers_getter_rva'] == '0x943E40'
             assert change['modifier_blocks']['block_floats'] == 15

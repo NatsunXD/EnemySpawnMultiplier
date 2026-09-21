@@ -5,8 +5,8 @@ local create_api = assert(loadfile(source .. '/windows_api.lua'))()
 local patch = assert(loadfile(source .. '/spawn_patch.lua'))()
 
 -- Mirror the overrides emitted by scripts/module.py for the preview variant.
-patch.budget_multiplier = 0.1
-patch.budget_override_multiplier = 0.1
+patch.budget_multiplier = 0.2
+patch.budget_override_multiplier = 0.2
 patch.derive_override_from_base = false
 patch.force_override_to_base = true
 patch.encounter_deadline_enabled = true
@@ -19,7 +19,11 @@ patch.modifier_scale_enabled = true
 patch.modifier_encounter_cooldown = 3.0
 patch.modifier_patrol_count = 3.0
 patch.modifier_patrol_cooldown = 3.0
-patch.modifier_travelers_max_unit = 3.0
+patch.modifier_travelers_max_unit = 10.0
+patch.template_bias_enabled = true
+patch.template_bias_light = 0.25
+patch.template_bias_medium = 1.0
+patch.template_bias_heavy = 4.0
 patch.guardforce_write_enabled = false
 patch.illuminate_guardforce_multiplier = 1.0
 patch.interval_mode = 'fixed'
@@ -28,7 +32,6 @@ patch.fixed_interval_max = 0.1
 patch.allow_zero_interval_min = true
 patch.cap_multiplier = 10
 patch.group_multiplier = 10
-patch.template_bias_enabled = false
 
 local real = create_api()
 local count = 0
@@ -40,6 +43,8 @@ assert(not real.writable_data(real.module(nil), 1))
 local DIRECTOR_SIZE = 0x54000
 local director_storage = ffi.new('uint8_t[?]', DIRECTOR_SIZE)
 local director = ffi.cast('uint8_t *', director_storage)
+local bias_templates_storage = ffi.new('uint8_t[?]', 16 * 0x100)
+local bias_templates = ffi.cast('uint8_t *', bias_templates_storage)
 local header_storage = ffi.new('uint8_t[?]', patch.cap_header_size)
 local header = ffi.cast('uint8_t *', header_storage)
 local entries_storage = ffi.new('uint8_t[?]', 64 * patch.entry_stride)
@@ -188,6 +193,22 @@ local function fill_config(min8, max8, min1, max1, group, desired, override)
     put_f32(cfg + patch.cfg_override_offset, override)
     put_f32(cfg + 0x80, 2)
 end
+local function fill_candidate(index, weight, cost, units)
+    local candidate = director + patch.candidate_pool_offset + index * patch.candidate_stride
+    local template = bias_templates + index * 0x100
+    ffi.fill(candidate, patch.candidate_stride, 0)
+    ffi.fill(template, 0x100, 0)
+    put_u32(candidate, index + 1)
+    put_u32(candidate + 4, units)
+    put_u32(candidate + 0x60, 1)
+    put_ptr(candidate + patch.candidate_template_offset, template)
+    put_f32(candidate + patch.candidate_weight_offset, weight)
+    put_f32(candidate + patch.candidate_cost_offset, cost)
+end
+local function candidate_weight(index)
+    return get_f32(director + patch.candidate_pool_offset
+        + index * patch.candidate_stride + patch.candidate_weight_offset)
+end
 local function approx(a, b) return math.abs(a - b) <= 0.002 end
 local function assert_config(min8, max8, min1, max1, group, desired)
     local cfg = director + patch.cfg_base_offset
@@ -212,16 +233,16 @@ put_u64(director + patch.timer_offsets[2], 15000000)
 put_u64(director + patch.encounter_deadline_offset, 61000000)
 local ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
-assert(approx(get_f32(director + patch.points_offset), 10))
+assert(approx(get_f32(director + patch.points_offset), 20))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 20))
 assert(get_u32(entries + patch.max_offset) == 10)
 assert(get_u64(director + patch.timer_offsets[1]) == 1100000)
 assert(get_u64(director + patch.timer_offsets[2]) == 1100000)
 assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
-assert(patch.detail:find('p=10.0/100.0', 1, true))
-assert(patch.detail:find('o=10.00', 1, true))
+assert(patch.detail:find('p=20.0/100.0', 1, true))
+assert(patch.detail:find('o=20.00', 1, true))
 assert(patch.detail:find('e=', 1, true) and patch.detail:find('m=', 1, true))
 assert(patch.detail:find('a=', 1, true) and patch.detail:find('b=', 1, true))
 assert(patch.detail:find('pd=', 1, true) and patch.detail:find('sd=', 1, true))
@@ -233,22 +254,22 @@ assert(patch.detail:find('g=100', 1, true))
 assert(patch.detail:find('d=30', 1, true))
 assert(patch.detail:find('t=3', 1, true))
 assert(patch.detail:find('tv=30.0-60.0', 1, true))
-assert(patch.detail:find('ms=3.0/3.0/3.0/3.0', 1, true))
-assert(patch.detail:find('mv=3.00/3.00/3.00/3.00', 1, true))
+assert(patch.detail:find('ms=3.0/3.0/3.0/10.0', 1, true))
+assert(patch.detail:find('mv=3.00/3.00/3.00/10.00', 1, true))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164 + 14 * 4), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 3.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 10.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 10.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 30))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 60))
-pass('preview lowers Encounter to 0.1x and clamps the reinforcement cooldown to two seconds')
+pass('preview lowers Encounter to 0.2x and clamps the reinforcement cooldown to two seconds')
 
 local settled_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == settled_writes)
-assert(approx(get_f32(director + patch.points_offset), 10))
+assert(approx(get_f32(director + patch.points_offset), 20))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
 assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
@@ -278,18 +299,18 @@ pass('cooldown clamp leaves due deadlines alone and reports an unwritable field'
 
 -- A strict preview ignores the native override value and forces the resolved
 -- config to the already-scaled director base, preventing a positive override
--- from bypassing the 0.1x budget.
+-- from bypassing the 0.2x budget.
 director_present = false
 assert(patch.apply(api, game))
 mission(faction_caps(45, 2000), 100, 600)
 fill_config(20, 40, 8, 14, 10, 30, 20)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 20))
 local override_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == override_writes)
-assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 10))
+assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 20))
 pass('strict preview forces the effective override to the scaled base and remains idempotent')
 
 -- Difficulty modifier blocks must scale from the stored baseline. A second pass
@@ -306,7 +327,7 @@ ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == modifier_writes)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc + 14 * 4), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 3.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 10.0))
 pass('already-scaled difficulty modifier blocks are not scaled twice')
 
 -- A block the game re-blends for a new difficulty must adopt the new native
@@ -329,7 +350,7 @@ fill_config(0, 0.1, 0, 0.1, 100, 30, -1)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
 assert_config(0, 0.1, 0, 0.1, 100, 30)
-assert(approx(get_f32(director + patch.points_offset), 10))
+assert(approx(get_f32(director + patch.points_offset), 20))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 pass('preview does not stack on an already-scaled config')
 
@@ -346,5 +367,33 @@ assert(patch.detail:find('spawn_config_layout_mismatch', 1, true))
 assert(ffi.string(director + patch.cfg_base_offset + 0x38, 0x1c) == cfg_before)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x3c), 0))
 pass('preview rejects zero maximum intervals instead of disabling the timed path')
+
+-- Heavy-focus bias: candidates are ranked by cost per planned unit, so the
+-- costliest quintile is the heavy tier. It must gain weight while the cheapest
+-- half loses weight, and a second pass must not stack the change.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+put_u32(director + patch.candidate_count_offset, 5)
+fill_candidate(0, 1.0, 10.0, 10)
+fill_candidate(1, 1.0, 20.0, 10)
+fill_candidate(2, 1.0, 30.0, 10)
+fill_candidate(3, 1.0, 80.0, 10)
+fill_candidate(4, 1.0, 200.0, 10)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and reason == 'spawn_multiplier_ready')
+assert(patch.detail:find('w=5/5', 1, true))
+assert(approx(candidate_weight(0), 0.25))
+assert(approx(candidate_weight(1), 0.25))
+assert(approx(candidate_weight(2), 0.25))
+assert(approx(candidate_weight(3), 1.0))
+assert(approx(candidate_weight(4), 4.0))
+local bias_writes = writes
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and writes == bias_writes)
+assert(approx(candidate_weight(4), 4.0))
+assert(approx(candidate_weight(0), 0.25))
+pass('heavy tier candidates gain weight and the bias does not stack')
 
 print(count .. ' preview profile checks passed; no executable code was modified.')

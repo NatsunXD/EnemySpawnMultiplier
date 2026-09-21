@@ -224,6 +224,34 @@ rows, and must stay alive as long as native code can reach it.
 The module raises nonzero per-type maxima and `cfg+0x48` (the group-size clamp) by
 `10x`. Zero rows stay zero because zero is a native skip.
 
+### 4.8 Encounter template weighting
+
+Encounter waves pick templates from the candidate pool at
+`director+0x432F8` (count at `director+0x5188C`, stride `0xD8`). Each candidate
+carries a weight at `+0xC0`, a cost at `+0xD4`, an inline row set at `+0`, a row
+count at `+0x60`, and a source-definition pointer at `+0xA8`.
+
+The reweighting pass in `scale_candidate_weights` computes
+`density = cost / planned_units` for every candidate, sorts the densities, and
+splits them at the 50th and 80th percentile. Each band then receives a fixed
+multiplier applied to that candidate's stored baseline weight:
+
+| Band | Selection | Light-Medium profile | Heavy-focus profile |
+|---|---|---|---|
+| cheapest 50% | `density <= p50` | `3.6x` | `0.25x` |
+| middle 30% | `p50 < density <= p80` | `1.25x` | `1.0x` |
+| costliest 20% | `density > p80` | `0.25x` | `4.0x` |
+
+Cost per planned unit is the closest available proxy for armour weight, so the
+costliest quintile is where the heavy units live. The two profiles use the same
+mechanism with opposite polarity, which is why `Light-Medium Bias` and the
+heavy-focus preview share one code path.
+
+Idempotence relies on a per-candidate key of
+`index:source_pointer:cost`. A stored baseline is re-adopted only when the live
+weight matches neither the baseline nor the last applied value, which is the case
+the game re-rolls a candidate pool for a new mission.
+
 ## 5. Paths that are dead on this build
 
 These were each tried, measured and rejected. They are recorded so they are not
@@ -303,16 +331,23 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Preview - `data-v16.10-preview-low-budget-patrol`
+### Preview - `data-v16.12-preview-low-budget-patrol`
 
-Reinforcement budget `0.1x`, and `cfg+0x78` is forced to the already-scaled
+Reinforcement budget `0.2x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
 
-The three curves in section 4.2 are multiplied by `3.0`. Each block keeps its own
-baseline so a second pass cannot stack, and if the game re-blends a curve for a
-new difficulty the freshly blended native value becomes the new baseline and is
-scaled once from there. GuardForce is not written at all, so static defenders keep
-their native budget and schedule.
+Four curves are scaled: `0x164` encounter cooldown `3.0x`, `0x1A0` patrol count
+`3.0x`, `0x1DC` patrol spawn cooldown `3.0x`, and `0x3F8` units per patrol wave
+`10.0x`. Each block keeps its own baseline so a second pass cannot stack, and if
+the game re-blends a curve for a new difficulty the freshly blended native value
+becomes the new baseline and is scaled once from there.
+
+Encounter candidates are reweighted with the heavy-focus column of section 4.8:
+the cheapest half drops to `0.25x`, the middle `30%` stays at `1.0x`, and the
+costliest `20%` rises to `4.0x`.
+
+GuardForce is not written at all, so static defenders keep their native budget
+and schedule.
 
 Timed intervals are fixed at `0.0-0.1` s. They are inert on this build per
 section 5.1 but correct if the branch is ever reached. The maximum stays at `0.1`
@@ -378,7 +413,7 @@ reinforcement cooldown and shorter patrol refresh cooldown - were confirmed on
 the Terminid front. That confirms the polarity reading in section 4.3 and the
 field mapping in section 4.2.
 
-The verified artifact is:
+The artifact that confirmed both cooldown behaviours is:
 
 ```text
 releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.10-preview.zip
@@ -387,12 +422,31 @@ gameplay payload data/9ba626afa44a3aa3.patch_0
 SHA-256 3000539AB5260591891E095C669B976AF1408508C38D95E534DC978AEF1B6170
 ```
 
+The current preview build is:
+
+```text
+releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.12-preview.zip
+SHA-256 E7CF302E99566B30E97CE9C971A3BB34C4E33E40E1A227015250F6A1F6B3CFE2
+gameplay payload data/9ba626afa44a3aa3.patch_0
+SHA-256 391B0EF4DDEB27D918999004489EA80674611EE5F40DF2BF67D91814D9D9C3E7
+```
+
+The v16 pair carries no curve scaling, no traveler write, no deadline clamp and
+no candidate reweighting, so its behaviour is the pre-existing 6x data profile;
+its provenance manifest differs only in the extra descriptive metadata fields.
+
+Offline: 24 synthetic checks on the data path, 9 preview-profile checks, 7 package
+checks. The preview suite now also covers heavy-tier reweighting and the
+no-stacking guarantee for candidate weights.
+
 Rebuilding from the same source reproduces that ZIP byte for byte, so the tested
 bytes and the shipped bytes are the same file. The gameplay payload hash is
 recorded separately so a future rebuild that changes only packaging metadata can
 still be compared against what was actually played.
 
-Not yet exercised live: Automaton and Illuminate, the Illuminate GuardForce
-`0.25x` path, mission-to-mission transitions inside one process, and host versus
-solo differences. `runtime_verified` stays `false` in the manifests until those
-are covered; the in-game confirmation above is narrower than the full matrix.
+Live confirmation covers the reinforcement cooldown, the patrol refresh cooldown
+and the direction of the `_rate_` convention. Not yet exercised live: the 10x
+patrol squad size, the heavy-tier candidate weighting, Automaton and Illuminate,
+the Illuminate GuardForce `0.25x` path, mission-to-mission transitions inside one
+process, and host versus solo differences. `runtime_verified` stays `false` in
+the manifests until those are covered.
