@@ -14,6 +14,8 @@ local patch = {
     budget_override_multiplier = 6,
     derive_override_from_base = true,
     force_override_to_base = false,
+    encounter_deadline_enabled = false,
+    encounter_max_interval = 2.0,
     guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
@@ -38,6 +40,11 @@ local patch = {
     encounter_deadline_offset = 0x399D8,
     encounter_manager_rva = 0x276C348,
     encounter_manager_count_offset = 0x934,
+    scheduler_a_rva = 0x276C2B0,
+    scheduler_a_offset = 0x4A4,
+    scheduler_b_rva = 0x276CA28,
+    scheduler_b_offset = 0x1C,
+    scheduler_flags = {0x5189C, 0x518A0, 0x518A4, 0x518A8},
     candidate_pool_offset = 0x432F8,
     candidate_count_offset = 0x5188C,
     candidate_stride = 0xD8,
@@ -279,18 +286,36 @@ local function read_pop(api, director)
     local raw = api.read(director + patch.pop_offset, 4)
     return raw and u32(raw, 0) or 0
 end
-local function encounter_status(api, game, director)
+local function read_u32_at(api, address)
+    local bytes = address and api.read(address, 4)
+    return bytes and u32(bytes, 0) or 0
+end
+local function deadline_delta(api, address, now)
+    local bytes = api.read(address, 8)
+    local value = bytes and u64(bytes, 0)
+    if not now or not value then return -1 end
+    return (value - now) / patch.timer_units_per_second
+end
+local function scheduler_status(api, game, director)
     local clock = api.pointer(api.read(game + patch.time_rva, 8))
     local now_bytes = clock and api.read(clock + 0x18, 8)
     local now = now_bytes and u64(now_bytes, 0)
-    local deadline_bytes = api.read(director + patch.encounter_deadline_offset, 8)
-    local deadline = deadline_bytes and u64(deadline_bytes, 0)
-    local delta = now and deadline
-        and (deadline - now) / patch.timer_units_per_second or -1
     local manager = api.pointer(api.read(game + patch.encounter_manager_rva, 8))
-    local manager_bytes = manager and api.read(manager + patch.encounter_manager_count_offset, 4)
-    local manager_count = manager_bytes and u32(manager_bytes, 0) or 0
-    return string.format(' e=%.2f m=%d', delta, manager_count)
+    local lists = read_u32_at(api, manager and manager + patch.encounter_manager_count_offset)
+    local a_manager = api.pointer(api.read(game + patch.scheduler_a_rva, 8))
+    local b_manager = api.pointer(api.read(game + patch.scheduler_b_rva, 8))
+    local a = read_u32_at(api, a_manager and a_manager + patch.scheduler_a_offset)
+    local b = read_u32_at(api, b_manager and b_manager + patch.scheduler_b_offset)
+    local flags = {}
+    for index, offset in ipairs(patch.scheduler_flags) do
+        flags[index] = read_u32_at(api, director + offset) ~= 0 and 1 or 0
+    end
+    return string.format(' e=%.2f m=%d a=%d b=%d pd=%.2f sd=%.2f fl=%d%d%d%d',
+        deadline_delta(api, director + patch.encounter_deadline_offset, now), lists,
+        a, b,
+        deadline_delta(api, director + patch.timer_offsets[2], now),
+        deadline_delta(api, director + patch.timer_offsets[1], now),
+        flags[1], flags[2], flags[3], flags[4])
 end
 local function scale_candidate_weights(api, director)
     if not patch.template_bias_enabled then return 0, 0 end
@@ -419,6 +444,17 @@ local function write_interval(api, address, offset, current, target)
     return api.write(address + offset, pack_f32(target))
         and near(number(api.read(address + offset, 4) or '', 0), target)
 end
+local function clamp_deadline(api, address, limit, label)
+    local bytes = api.read(address, 8)
+    local pending = bytes and u64(bytes, 0)
+    if not pending or pending <= limit then return 0 end
+    if not api.writable_data(address, 8) then return 0, label .. '_not_writable_private_data' end
+    if not api.write(address, pack_u64(limit))
+        or u64(api.read(address, 8) or '', 0) ~= limit then
+        return nil, label .. '_write_failed'
+    end
+    return 1
+end
 local function clamp_timers(api, game, director, cfg)
     if not cfg then return 0 end
     local clock = api.pointer(api.read(game + patch.time_rva, 8))
@@ -426,20 +462,28 @@ local function clamp_timers(api, game, director, cfg)
     local now_bytes = api.read(clock + 0x18, 8)
     local now = now_bytes and u64(now_bytes, 0)
     if not now or now < 0 or now > 9000000000000000 then return 0 end
+    local changed, notes = 0, {}
     local maximums = {cfg.i3c, cfg.i44}
-    local changed = 0
     for index, offset in ipairs(patch.timer_offsets) do
-        local bytes = api.read(director + offset, 8)
-        local pending = bytes and u64(bytes, 0)
         local limit = now + math.floor(maximums[index] * patch.timer_units_per_second + 0.5)
-        if pending and pending > limit and api.writable_data(director + offset, 8) then
-            if not api.write(director + offset, pack_u64(limit))
-                or u64(api.read(director + offset, 8), 0) ~= limit then
-                return nil, 'spawn_timer_write_failed'
-            end
-            changed = changed + 1
-        end
+        local applied, note = clamp_deadline(api, director + offset, limit, 'spawn_timer')
+        if applied == nil then return nil, note end
+        changed = changed + applied
+        if note then notes[#notes + 1] = note end
     end
+    if patch.encounter_deadline_enabled then
+        if not finite(patch.encounter_max_interval) or patch.encounter_max_interval < 0.1
+            or patch.encounter_max_interval > 600 then
+            return nil, 'spawn_encounter_interval_profile_mismatch'
+        end
+        local limit = now + math.floor(patch.encounter_max_interval * patch.timer_units_per_second + 0.5)
+        local applied, note = clamp_deadline(api, director + patch.encounter_deadline_offset, limit,
+            'spawn_encounter_timer')
+        if applied == nil then return nil, note end
+        changed = changed + applied
+        if note then notes[#notes + 1] = note end
+    end
+    if #notes > 0 then return changed, table.concat(notes, ',') end
     return changed
 end
 local function resolve_resource_config(api, game, key)
@@ -740,13 +784,14 @@ function patch.apply(api, game)
     if weighted == nil then return false, candidate_count, false end
     local configs, cfg_live, cfg_reason = scale_config(api, game, director)
     if configs == nil then return false, cfg_live, false end
-    local timers, timer_reason = clamp_timers(api, game, director, cfg_live)
-    if timers == nil then return false, timer_reason, false end
+    local timers, timer_note = clamp_timers(api, game, director, cfg_live)
+    if timers == nil then return false, timer_note, false end
     local pop_live = read_pop(api, director)
     local scaled_points = mission.points_applied or points
     describe(scaled_points, mission.points_original, valid, count, timers, pop_live, cfg_live,
         scaled_guardforce, mission.guardforce_original, faction)
-    patch.detail = patch.detail .. encounter_status(api, game, director)
+    patch.detail = patch.detail .. scheduler_status(api, game, director)
+        .. (timer_note and (' n=' .. timer_note) or '')
         .. ' w=' .. tostring(weighted) .. '/' .. tostring(candidate_count)
         .. (bias_reason and (':' .. bias_reason) or '')
         .. ' cfg=' .. tostring(cfg_reason)

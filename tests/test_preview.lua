@@ -9,6 +9,8 @@ patch.budget_multiplier = 0.1
 patch.budget_override_multiplier = 0.1
 patch.derive_override_from_base = false
 patch.force_override_to_base = true
+patch.encounter_deadline_enabled = true
+patch.encounter_max_interval = 2.0
 patch.guardforce_write_enabled = false
 patch.illuminate_guardforce_multiplier = 1.0
 patch.interval_mode = 'fixed'
@@ -49,6 +51,7 @@ local resource_storage = ffi.new('uint8_t[?]', 0x260 + 38 * patch.cfg_stride)
 local resource_root = ffi.cast('uint8_t *', resource_storage)
 local resource_root_live = resource_root
 local director_present, mode_present, time_present, writes = false, false, false, 0
+local encounter_deadline_unwritable = false
 
 local function pointer(value) return ffi.string(ffi.new('void *[1]', value), 8) end
 local function put_ptr(dest, value) ffi.copy(dest, ffi.new('void *[1]', value), 8) end
@@ -108,6 +111,10 @@ api.write = function(address, bytes)
     return result
 end
 api.writable_data = function(address, size)
+    if encounter_deadline_unwritable
+        and real.distance(address, director + patch.encounter_deadline_offset) == 0 then
+        return false
+    end
     return real.writable_data(address, size)
 end
 
@@ -177,13 +184,15 @@ local function assert_config(min8, max8, min1, max1, group, desired)
 end
 
 -- Fresh mission: Encounter falls to 0.1x, GuardForce remains native, timed paths
--- use 0.0-0.1 seconds, and pending deadlines are clamped to the new maximum.
+-- use 0.0-0.1 seconds, the enemy reinforcement cooldown is clamped to two
+-- seconds, and pending deadlines are clamped to their new maximum.
 director_present = false
 assert(patch.apply(api, game))
 mission(faction_caps(45, 2000), 100, 600)
 fill_config(20, 40, 8, 14, 10, 30, -1)
 put_u64(director + patch.timer_offsets[1], 41000000)
 put_u64(director + patch.timer_offsets[2], 15000000)
+put_u64(director + patch.encounter_deadline_offset, 61000000)
 local ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
 assert(approx(get_f32(director + patch.points_offset), 10))
@@ -193,14 +202,19 @@ assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offs
 assert(get_u32(entries + patch.max_offset) == 10)
 assert(get_u64(director + patch.timer_offsets[1]) == 1100000)
 assert(get_u64(director + patch.timer_offsets[2]) == 1100000)
+assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
 assert(patch.detail:find('p=10.0/100.0', 1, true))
 assert(patch.detail:find('o=10.00', 1, true))
 assert(patch.detail:find('e=', 1, true) and patch.detail:find('m=', 1, true))
+assert(patch.detail:find('a=', 1, true) and patch.detail:find('b=', 1, true))
+assert(patch.detail:find('pd=', 1, true) and patch.detail:find('sd=', 1, true))
+assert(patch.detail:find('fl=', 1, true))
 assert(patch.detail:find('gf=600.0/600.0', 1, true))
 assert(patch.detail:find('i=0.00-0.10/0.00-0.10', 1, true))
 assert(patch.detail:find('g=100', 1, true))
 assert(patch.detail:find('d=30', 1, true))
-pass('preview lowers Encounter to 0.1x while GuardForce and timed paths stay native-safe')
+assert(patch.detail:find('t=3', 1, true))
+pass('preview lowers Encounter to 0.1x and clamps the reinforcement cooldown to two seconds')
 
 local settled_writes = writes
 ok, reason, active = patch.apply(api, game)
@@ -208,7 +222,28 @@ assert(ok and active and writes == settled_writes)
 assert(approx(get_f32(director + patch.points_offset), 10))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
 assert_config(0, 0.1, 0, 0.1, 100, 30)
-pass('preview budget and interval writes are idempotent')
+assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
+pass('preview budget, interval and cooldown writes are idempotent')
+
+-- A pending reinforcement cooldown that is already due or inside the new window
+-- is left untouched, and an unwritable field fails closed instead of half-applying.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+put_u64(director + patch.encounter_deadline_offset, 1500000)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(get_u64(director + patch.encounter_deadline_offset) == 1500000)
+encounter_deadline_unwritable = true
+put_u64(director + patch.encounter_deadline_offset, 61000000)
+local frozen = ffi.string(director + patch.encounter_deadline_offset, 8)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(ffi.string(director + patch.encounter_deadline_offset, 8) == frozen)
+assert(patch.detail:find('n=spawn_encounter_timer_not_writable_private_data', 1, true))
+encounter_deadline_unwritable = false
+pass('cooldown clamp leaves due deadlines alone and reports an unwritable field')
 
 -- A strict preview ignores the native override value and forces the resolved
 -- config to the already-scaled director base, preventing a positive override

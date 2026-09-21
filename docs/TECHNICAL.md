@@ -74,7 +74,7 @@ adopt the faster v16 schedule.
 
 ## Preview profile: low Encounter / high timed patrol
 
-`data-v16.6-preview-low-budget-patrol` is a mutually exclusive preview package
+`data-v16.7-preview-low-budget-patrol` is a mutually exclusive preview package
 that tests whether pressure can be shifted away from Encounter waves toward the
 timed Patrol/Straggler paths:
 
@@ -112,10 +112,21 @@ apply. The preview does not add executable code patches or native spawn calls.
 
 Encounter cadence is separate from the composition budget. Native gate
 `0x94C030` checks `director+0x399D8` against the game clock before accepting a
-new Encounter. The preview reads that deadline and the live manager count into
-`e=` and `m=` diagnostics only. It does not write `0x399D8` until the field's
-writer and lifecycle are validated with a live read-only capture; an
-event-driven cooldown clamp is the next candidate, not part of v16.6.
+new Encounter, and the cooldown is refreshed by the fragment at
+`game.dll+0x94CCD0`, which stores `now + interval`. v16.7 clamps
+`director+0x399D8` to `now + 2.0` seconds whenever it is further away, using the
+same checked, readback, idempotent helper as the Patrol/Straggler deadlines. The
+field must be committed `MEM_PRIVATE/PAGE_READWRITE`; when it is not, the module
+skips the write and reports `n=spawn_encounter_timer_not_writable_private_data`
+instead of failing the whole profile.
+
+The whole timed scheduler at `0x9511F0` exits early when `A >= T` or
+`(T-A)+(B-A) >= 100`, where `A` is read from the manager at
+`game.dll+0x276C2B0` offset `0x4A4`, `B` from `game.dll+0x276CA28` offset
+`0x1C`, and `T` is the scaled desired target. v16.7 logs `A`, `B`, the
+Patrol/Straggler deadline deltas and the enable flags at
+`0x5189C/0x518A0/0x518A4/0x518A8` so a missing Patrol effect can be attributed
+to this gate rather than to the interval write.
 
 `cfg+0x50` is deliberately no longer scaled. Native function `0x9511F0` first
 checks the active component count against the scaled target, then rejects when
@@ -168,10 +179,10 @@ headroom under the unchanged shared population checks.
 ## Diagnostics and validation
 
 The log revision is `data-v16-native`, `data-v16-light-medium`, or
-`data-v16.6-preview-low-budget-patrol`. `p=` reports
+`data-v16.7-preview-low-budget-patrol`. `p=` reports
 Encounter budget, `gf=` GuardForce current/original budget, `f=` detected
 faction, `c=` cap rows, `i=` scaled Straggler/Patrol intervals, `g=` group clamp,
-`d=` unchanged desired target, `o=` effective `cfg+0x78` override, `e=` seconds until the read-only Encounter deadline, `m=` live Encounter manager count, `t=` Patrol/Straggler deadlines shortened on the latest check,
+`d=` unchanged desired target, `o=` effective `cfg+0x78` override, `e=` seconds until the reinforcement cooldown, `m=` live Encounter manager count, `a=`/`b=` scheduling counters, `pd=`/`sd=` Patrol/Straggler deadline deltas, `fl=` scheduler enable flags, `t=` deadlines shortened on the latest check, `n=` skipped-but-not-fatal deadline note,
 `w=` biased/available candidates or its fallback reason, and `cfg=` the active
 resolver result. `l=vanilla` confirms executable population branches are unchanged.
 
@@ -180,7 +191,7 @@ timer clamping, idempotence, config resolution, resource and cap-table cloning,
 template bias, mission rebuilds, queue/counter preservation, and failure paths.
 The preview suite additionally covers the `0.1x` Encounter write, native
 GuardForce preservation, fixed `0.0-0.1` second intervals, zero-maximum
-rejection, strict positive-override replacement, Encounter deadline diagnostics, and no-stacking behavior.
+rejection, strict positive-override replacement, the checked reinforcement-cooldown clamp, scheduler diagnostics, and no-stacking behavior.
 Package tests verify the manifest, hashes, both resource identities, the exact
 v15 discovery declaration and forwarding target, absence of custom DLLs, and
 absence of executable-page modification APIs. Runtime verification remains false

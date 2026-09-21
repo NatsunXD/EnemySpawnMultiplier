@@ -39,21 +39,30 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v16.6-preview-low-budget-patrol': 'v16.6-preview',
+            'data-v16.7-preview-low-budget-patrol': 'v16.7-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v16.6-preview-low-budget-patrol':
+        if provenance['revision'] == 'data-v16.7-preview-low-budget-patrol':
             assert change['budget_multiplier'] == 0.1
             assert change['budget_override_multiplier'] == 0.1
             assert change['derive_override_from_base'] is False
             assert change['force_override_to_base'] is True
             assert change['encounter_deadline_offset'] == '0x399D8'
+            assert change['encounter_deadline_writer_rva'] == '0x94CCE8'
+            assert change['encounter_admission_rva'] == '0x94C030'
+            assert change['encounter_deadline_enabled'] is True
+            assert change['encounter_max_interval'] == 2.0
             assert change['encounter_manager_rva'] == '0x276C348'
             assert change['encounter_manager_count_offset'] == '0x934'
+            assert change['scheduler_a_rva'] == '0x276C2B0'
+            assert change['scheduler_a_offset'] == '0x4A4'
+            assert change['scheduler_b_rva'] == '0x276CA28'
+            assert change['scheduler_b_offset'] == '0x1C'
+            assert change['scheduler_flags'] == ['0x5189C', '0x518A0', '0x518A4', '0x518A8']
             assert change['guardforce_write_enabled'] is False
             assert change['guardforce_changed'] == 'none'
             assert change['illuminate_guardforce_multiplier'] == 1.0
@@ -65,6 +74,7 @@ def main():
         else:
             assert change['budget_multiplier'] == 6
             assert change['budget_override_multiplier'] == 6
+            assert change['encounter_deadline_enabled'] is False
             assert change['guardforce_write_enabled'] is True
             assert change['guardforce_changed'] == 'illuminate_only'
             assert change['illuminate_guardforce_multiplier'] == 0.25
