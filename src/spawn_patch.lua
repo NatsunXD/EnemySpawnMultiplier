@@ -1,7 +1,7 @@
--- Data-only spawn tuning profiles for the supported 1.8.45317.0 build.
+-- Data-only spawn tuning profiles for the supported 1.8.45850.0 build.
 -- Encounter points are a per-reinforcement composition budget from
 -- director+0x518B0, not a remaining pool. Timed Patrol/Straggler frequency comes
--- from the resolved 0x438 config at director+0x519A4. The v16 profiles raise the
+-- from the resolved 0x43C config at director+0x519AC. The v18 profiles raise the
 -- Encounter budget and shorten both timed paths. The Fast Cadence profile lowers
 -- the
 -- Encounter budget while driving the timed paths to their positive scheduling
@@ -24,9 +24,9 @@ local patch = {
     traveler_cooldown_enabled = false,
     traveler_cooldown_min = 0,
     traveler_cooldown_max = 0,
-    -- MissionDifficultySettings modifier curves inside the same 0x438 row.
+    -- MissionDifficultySettings modifier curves inside the same 0x43C row.
     -- Each block is 15 floats (5 + 4 + 1 + 5) blended per difficulty/progress by
-    -- game.dll+0xD49E70. A value of 0 disables that block. Fields whose name
+    -- game.dll+0xFE5280. A value of 0 disables that block. Fields whose name
     -- contains _rate_ are frequency multipliers; cooldown shrinks as they grow.
     modifier_scale_enabled = false,
     modifier_encounter_cooldown = 0,   -- cfg+0x164 encounter_cooldown_rate_modifier
@@ -40,7 +40,8 @@ local patch = {
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
     illuminate_guardforce_multiplier = 0.25,
-    -- Raw cap-table counts observed on the supported 1.8.45317.0 build.
+    -- Cap-table counts observed on 1.8.45317.0 and not remeasured on 1.8.45850.0.
+    -- A mismatch only labels the faction unknown and skips Illuminate guard scaling.
     faction_cap_counts = {automaton = 61, terminid = 44, illuminate = 45},
     cap_multiplier = 10,
     interval_mode = 'divide',
@@ -49,18 +50,18 @@ local patch = {
     fixed_interval_max = 0.1,
     allow_zero_interval_min = false,
     group_multiplier = 10,
-    director_rva = 0x276CA20,
-    mode_rva = 0x276c3d0,
-    time_rva = 0x276C068,
+    director_rva = 0x3326D10,
+    mode_rva = 0x33266A0,
+    time_rva = 0x3326348,
     cap_table_offset = 0x660,
     cap_header_size = 0xB0,
     points_offset = 0x518B0,
     encounter_deadline_offset = 0x399D8,
-    encounter_manager_rva = 0x276C348,
+    encounter_manager_rva = 0x3326618,
     encounter_manager_count_offset = 0x934,
-    scheduler_a_rva = 0x276C2B0,
+    scheduler_a_rva = 0x3326588,
     scheduler_a_offset = 0x4A4,
-    scheduler_b_rva = 0x276CA28,
+    scheduler_b_rva = 0x3326D18,
     scheduler_b_offset = 0x1C,
     scheduler_flags = {0x5189C, 0x518A0, 0x518A4, 0x518A8},
     probe_timer_offsets = {0x399D0, 0x399E8, 0x399F0, 0x3A510, 0x3A528, 0x3A530, 0x3A538},
@@ -82,17 +83,17 @@ local patch = {
     min_max = 1,
     max_max = 512,
     cfg_handle_offset = 0x6B0,
-    cfg_table_offset = 0x51960,
-    cfg_count_offset = 0x51968,
-    cfg_hash_multiplier_offset = 0x51970,
-    cfg_sentinel_offset = 0x5196c,
-    cfg_invalid_generation_rva = 0x2786C64,
-    resource_manager_rva = 0x276F0C0,
-    resource_table_offset = 0xF116D8,
+    cfg_table_offset = 0x51968,
+    cfg_count_offset = 0x51970,
+    cfg_hash_multiplier_offset = 0x51978,
+    cfg_sentinel_offset = 0x51974,
+    cfg_invalid_generation_rva = 0x3483C24,
+    resource_manager_rva = 0x346BF98,
+    resource_table_offset = 0xF12B18,
     resource_slots = 38,
-    cfg_base_offset = 0x519A4,
+    cfg_base_offset = 0x519AC,
     cfg_override_offset = 0x78,
-    cfg_stride = 0x438,
+    cfg_stride = 0x43C,
     cfg_max = 8,
     min_interval = 0.1,
     max_interval = 600,
@@ -425,7 +426,7 @@ local function scale_candidate_weights(api, director)
     return #candidates, count
 end
 local MODIFIER_BLOCK_SIZE = 15
--- 0x3F8 is the only patrol-specific size lever: game.dll+0x943E40 computes the
+-- 0x3F8 is the only patrol-specific size lever: game.dll+0x94E900 computes the
 -- traveler unit count as round(base_count * cfg[curve_index + 0x3F8]). The other
 -- two patrol curves control how many patrols exist and how often they appear.
 local MODIFIER_BLOCKS = {
@@ -617,7 +618,7 @@ local function resolve_resource_config(api, game, key)
     local cloned, clone_reason = ensure_resource_clone(api, game, manager, root)
     if not cloned then return nil, clone_reason end
     root = cloned
-    -- Native 0x500E60 uses an unsigned 64-bit key modulo 38. Reducing
+    -- Native 0x505F50 uses an unsigned 64-bit key modulo 38. Reducing
     -- byte-by-byte avoids losing low bits through Lua's double precision.
     local slot = 0
     for byte = 8, 1, -1 do slot = (slot * 256 + key:byte(byte)) % patch.resource_slots end

@@ -1,10 +1,33 @@
 # Enemy Spawn Multiplier - technical reference
 
-Targets Steam build `24826606` / EXE `1.8.45317.0`. All addresses are `game.dll`
-RVAs or offsets from the named runtime object. Static evidence and the four
-read-only captures are under `research/`; the field identification worked from a
-plaintext typelib (`dl_library.dl_typelib`) plus the community field-name JSON,
-not from guessing offsets.
+Targets Steam build `25327279` / EXE `1.8.45850.0`. All addresses are `game.dll`
+RVAs or offsets from the named runtime object. The field identification below
+was worked out on `1.8.45317.0` from a plaintext typelib plus the community
+field-name JSON. The 1.8.45850.0 retarget was checked against a decrypted
+`game.dll` image: globals and the config-row anchor moved, and the row grew by
+4 bytes. HiveMind fields the module writes did not move. Narrative disassembly
+that still quotes an old RVA is the previous build; use this table for the
+build the packages accept.
+
+| What | 1.8.45317.0 | 1.8.45850.0 |
+|---|---|---|
+| EXE SHA-256 | `A09FF526…88CC3` | `D8E23968…CA6827` |
+| `game.dll` SHA-256 | `CC75948D…5470C` | `73374BD4…E201F` |
+| director / mode / clock | `0x276CA20` / `0x276C3D0` / `0x276C068` | `0x3326D10` / `0x33266A0` / `0x3326348` |
+| encounter manager | `0x276C348` | `0x3326618` |
+| scheduler A / B | `0x276C2B0` / `0x276CA28` | `0x3326588` / `0x3326D18` |
+| invalid generation / resource manager | `0x2786C64` / `0x276F0C0` | `0x3483C24` / `0x346BF98` |
+| resource-key table | `+0xF116D8` | `+0xF12B18` |
+| hash table / count / sentinel / multiplier | `+0x51960` / `+0x51968` / `+0x5196C` / `+0x51970` | `+0x51968` / `+0x51970` / `+0x51974` / `+0x51978` |
+| config row | `director+0x519A4`, stride `0x438` | `director+0x519AC`, stride `0x43C` |
+| influence sample | `director+0x51948` | `director+0x51950` |
+| budget / admission / deadline store | `0x94AF30` / `0x94C030` / `0x94CCE8` | `0x956040` / `0x957140` / `0x957E08` |
+| resolver / resource lookup | `0x501490` / `0x500E60` | `0x506580` / `0x505F50` |
+| progression / influence index | `0x94DE00` / `0x94DE80` | `0x958F20` / `0x958FA0` |
+| travelers getter / curve evaluator | `0x943E40` / `0xD49E70` | `0x94E900` / `0xFE5280` |
+
+`runtime_verified` stays false until this retarget is played. Cap-table counts
+61/44/45 were not remeasured; a mismatch only marks the faction unknown.
 
 ## 1. Runtime boundary
 
@@ -45,16 +68,18 @@ forwards once and holds no logic of its own.
 
 ## 3. The config row is HiveMindComponent
 
-The active director is read from `game.dll+0x276CA20`. The handle at
+The active director is read from `game.dll+0x3326D10`. The handle at
 `director+0x6B0` resolves through the native generation hash table at
-`director+0x51960`; on a miss the 38-slot resource-key table referenced by
-`game.dll+0x276F0C0` at offset `+0xF116D8` is used, and on a further miss the
+`director+0x51968`; on a miss the 38-slot resource-key table referenced by
+`game.dll+0x346BF98` at offset `+0xF12B18` is used, and on a further miss the
 resource table is cloned into private memory and retargeted so its rows become
 writable.
 
-The resolved row is `director+0x519A4 + index*0x438`. The typelib records
-`HiveMindComponent` as exactly 1080 bytes = `0x438`, which is why
-`cfg_stride = 0x438`. Its layout, confirmed against the field-name JSON:
+The resolved row is `director+0x519AC + index*0x43C`. On 1.8.45317.0 the
+typelib recorded `HiveMindComponent` as 1080 bytes (`0x438`). The new resolver
+uses stride `0x43C`. Every field the module writes was checked in the new
+getters and is still at the old offset, so the extra 4 bytes are after
+`+0x434`, not inserted in front of those fields:
 
 | Offset | Field |
 |---|---|
@@ -70,8 +95,8 @@ The resolved row is `director+0x519A4 + index*0x438`. The typelib records
 | `+0x88` | `mission_difficulty_settings` (940 bytes) |
 | `+0x434` | trailing flags |
 
-`0x88 + 940 = 0x434`, and the four trailing bytes bring the row to `0x438`. The
-two independent derivations agree, so the offsets below are not approximations.
+`0x88 + 940 = 0x434`. The previous build had 4 trailing bytes (`0x438`); this
+build has 8 (`0x43C`). Offsets below that point are unchanged.
 
 ## 4. Verified spawn levers
 
@@ -322,7 +347,7 @@ the cooldown at `director+0x3A510` was never armed.
 Both profiles share one resource identity and one loader entry, so exactly one
 package may be installed.
 
-### v16 - `data-v16-native` / `data-v16-light-medium`
+### v18 - `data-v18-native` / `data-v18-light-medium`
 
 Encounter budget `6x` via `cfg+0x78`, nonzero caps and group clamp `10x`, timed
 intervals `/10`. Illuminate GuardForce budget is reduced to `0.25x` so static
@@ -331,7 +356,7 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Fast Cadence - `data-v17-fast-cadence`
+### Fast Cadence - `data-v18-fast-cadence`
 
 Reinforcement budget `0.4x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
@@ -454,11 +479,15 @@ SHA-256 1FAA1DF6E0B8F30DADE941614DBE871DA6DD4BB39B6BAEDB1274D76A640C1793
 gameplay payload SHA-256 F176D4D5C8A5DE499B11B0C8F3BA65B3D21D638F6A7BA80C390CC388A9FDF907
 ```
 
-The v16 pair carries no curve scaling, no traveler write, no deadline clamp and no
-candidate reweighting, so its behaviour is the pre-existing data profile.
+The native and light-medium packages carry no curve scaling, no traveler write,
+no deadline clamp and no candidate reweighting, so their behaviour is the
+pre-existing data profile.
 
-The promoted release has not itself been played: its budget step and its patrol
-split are both new relative to the builds listed as confirmed above.
+v17 promoted Fast Cadence without a played session of that exact budget step and
+patrol split. Those earlier played sessions were on Steam build `24826606` /
+EXE `1.8.45317.0`. v18 keeps that behaviour and only retargets all three
+packages to Steam build `25327279` / EXE `1.8.45850.0`, using the addresses in
+the table at the top. That retarget has not been played either.
 `runtime_verified` therefore stays `false` in the manifests. Also not yet exercised
 live: Automaton and Illuminate, the Illuminate GuardForce adjustment, mission-to-
 mission transitions inside one process, and host versus solo differences.

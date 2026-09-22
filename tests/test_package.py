@@ -37,23 +37,23 @@ def main():
             offset = end + 4
         assert offset == len(png)
         expected_versions = {
-            'data-v16-native': 'v16',
-            'data-v16-light-medium': 'v16',
-            'data-v17-fast-cadence': 'v17',
+            'data-v18-native': 'v18',
+            'data-v18-light-medium': 'v18',
+            'data-v18-fast-cadence': 'v18',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v17-fast-cadence':
+        if provenance['revision'] == 'data-v18-fast-cadence':
             assert change['budget_multiplier'] == 0.4
             assert change['budget_override_multiplier'] == 0.4
             assert change['derive_override_from_base'] is False
             assert change['force_override_to_base'] is True
             assert change['encounter_deadline_offset'] == '0x399D8'
-            assert change['encounter_deadline_writer_rva'] == '0x94CCE8'
-            assert change['encounter_admission_rva'] == '0x94C030'
+            assert change['encounter_deadline_writer_rva'] == '0x957E08'
+            assert change['encounter_admission_rva'] == '0x957140'
             assert change['encounter_deadline_enabled'] is True
             assert change['encounter_max_interval'] == 2.0
             assert change['traveler_cooldown_enabled'] is False
@@ -70,18 +70,18 @@ def main():
                                                              'medium': 1.0,
                                                              'heavy': 4.0}
             assert change['hive_mind_config']['travelers_max_unit_count_multiplier'] == '0x3F8'
-            assert change['hive_mind_config']['travelers_getter_rva'] == '0x943E40'
+            assert change['hive_mind_config']['travelers_getter_rva'] == '0x94E900'
             assert change['modifier_blocks']['block_floats'] == 15
-            assert change['modifier_blocks']['evaluator_rva'] == '0xD49E70'
+            assert change['modifier_blocks']['evaluator_rva'] == '0xFE5280'
             assert change['hive_mind_config']['traveler_spawn_point_cooldown'] == ['0x0C', '0x10']
             assert change['probe_timers_enabled'] is True
             assert change['probe_timer_offsets'] == ['0x399D0', '0x399E8', '0x399F0', '0x3A510', '0x3A528', '0x3A530', '0x3A538']
             assert change['timeline_log'] == {'interval_seconds': 1.0, 'rotate_bytes': 4194304}
-            assert change['encounter_manager_rva'] == '0x276C348'
+            assert change['encounter_manager_rva'] == '0x3326618'
             assert change['encounter_manager_count_offset'] == '0x934'
-            assert change['scheduler_a_rva'] == '0x276C2B0'
+            assert change['scheduler_a_rva'] == '0x3326588'
             assert change['scheduler_a_offset'] == '0x4A4'
-            assert change['scheduler_b_rva'] == '0x276CA28'
+            assert change['scheduler_b_rva'] == '0x3326D18'
             assert change['scheduler_b_offset'] == '0x1C'
             assert change['scheduler_flags'] == ['0x5189C', '0x518A0', '0x518A4', '0x518A8']
             assert change['guardforce_write_enabled'] is False
