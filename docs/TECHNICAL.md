@@ -331,7 +331,7 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Preview - `data-v16.13-preview-low-budget-patrol`
+### Preview - `data-v16.14-preview-low-budget-patrol`
 
 Reinforcement budget `0.4x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
@@ -344,10 +344,18 @@ change in how many entries a wave can afford, not a proportional change in
 visible units.
 
 Four curves are scaled: `0x164` encounter cooldown `3.0x`, `0x1A0` patrol count
-`3.0x`, `0x1DC` patrol spawn cooldown `3.0x`, and `0x3F8` units per patrol wave
-`10.0x`. Each block keeps its own baseline so a second pass cannot stack, and if
+`6.0x`, `0x1DC` patrol spawn cooldown `3.0x`, and `0x3F8` units per patrol wave
+`6.0x`. Each block keeps its own baseline so a second pass cannot stack, and if
 the game re-blends a curve for a new difficulty the freshly blended native value
 becomes the new baseline and is scaled once from there.
+
+The patrol pair moved from 10x/3x to 6x/6x. Both combinations give similar
+sustained patrol pressure, but the shared component gate counts individual
+entities: a base wave of 11 units is up to 110 components at 10x versus up to 66
+at 6x, so halving the per-wave peak while doubling the number of allowed groups
+trades peak occupancy for breadth. The captured vanilla sessions peaked at 97
+components against the 448 limit, so the 10x build was spending real headroom that
+the 6x build keeps.
 
 Encounter candidates are reweighted with the heavy-focus column of section 4.8:
 the cheapest half drops to `0.25x`, the middle `30%` stays at `1.0x`, and the
@@ -439,13 +447,13 @@ gameplay payload data/9ba626afa44a3aa3.patch_0
 SHA-256 391B0EF4DDEB27D918999004489EA80674611EE5F40DF2BF67D91814D9D9C3E7
 ```
 
-The current preview build raises only the budget to `0.4x`:
+The current preview build rebalances the patrol pair to 6x/6x:
 
 ```text
-releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip
-SHA-256 3AE8D0AEEB52CFB6BC04A23AFA858F9E73AAA5CF3B5587330BB0F6EF0A62C119
+releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip
+SHA-256 1DD05E101A2A328B9DB1A867A59AD63877D70B23B0F7AD0AFD0B17879D99B2E6
 gameplay payload data/9ba626afa44a3aa3.patch_0
-SHA-256 5B3FE6DC38239E84EBCB41B3995BDCB3E6C02C88445B713DAF3ECBE0CE5F155A
+SHA-256 0A2B3B02A5243FBAEC6B6FABB81709161AF5595BC828FB71624778AE796656AD
 ```
 
 The v16 pair carries no curve scaling, no traveler write, no deadline clamp and
@@ -466,7 +474,7 @@ cooldown, the direction of the `_rate_` convention, the 10x patrol squad size vi
 `cfg+0x3F8`, and the heavy-tier candidate weighting with the `0.25/1.0/4.0`
 density bands. All were on the Terminid front.
 
-Not yet exercised live: the `0.4x` budget step, Automaton and Illuminate, the
-Illuminate GuardForce `0.25x` path, mission-to-mission transitions inside one
-process, and host versus solo differences. `runtime_verified` stays `false` in the
-manifests until those are covered.
+Not yet exercised live: the `0.4x` budget step, the 6x/6x patrol split, Automaton
+and Illuminate, the Illuminate GuardForce `0.25x` path, mission-to-mission
+transitions inside one process, and host versus solo differences.
+`runtime_verified` stays `false` in the manifests until those are covered.

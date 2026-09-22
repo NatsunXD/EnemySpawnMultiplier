@@ -17,9 +17,9 @@ patch.traveler_cooldown_min = 0.0
 patch.traveler_cooldown_max = 0.0
 patch.modifier_scale_enabled = true
 patch.modifier_encounter_cooldown = 3.0
-patch.modifier_patrol_count = 3.0
+patch.modifier_patrol_count = 6.0
 patch.modifier_patrol_cooldown = 3.0
-patch.modifier_travelers_max_unit = 10.0
+patch.modifier_travelers_max_unit = 6.0
 patch.template_bias_enabled = true
 patch.template_bias_light = 0.25
 patch.template_bias_medium = 1.0
@@ -254,14 +254,14 @@ assert(patch.detail:find('g=100', 1, true))
 assert(patch.detail:find('d=30', 1, true))
 assert(patch.detail:find('t=3', 1, true))
 assert(patch.detail:find('tv=30.0-60.0', 1, true))
-assert(patch.detail:find('ms=3.0/3.0/3.0/10.0', 1, true))
-assert(patch.detail:find('mv=3.00/3.00/3.00/10.00', 1, true))
+assert(patch.detail:find('ms=3.0/6.0/3.0/6.0', 1, true))
+assert(patch.detail:find('mv=3.00/6.00/3.00/6.00', 1, true))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 3.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 6.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164 + 14 * 4), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 10.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 10.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 6.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 30))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 60))
 pass('preview lowers Encounter to 0.4x and clamps the reinforcement cooldown to two seconds')
@@ -327,7 +327,7 @@ ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == modifier_writes)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc + 14 * 4), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 10.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 6.0))
 pass('already-scaled difficulty modifier blocks are not scaled twice')
 
 -- A block the game re-blends for a new difficulty must adopt the new native
@@ -335,11 +335,11 @@ pass('already-scaled difficulty modifier blocks are not scaled twice')
 put_f32(director + patch.cfg_base_offset + 0x1a0, 2.0)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 12.0))
 put_f32(director + patch.cfg_base_offset + 0x1a0, 2.0)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 12.0))
 pass('a re-blended modifier block is re-scaled once from its new native value')
 
 -- A config already in the preview state must not multiply its group or intervals again.

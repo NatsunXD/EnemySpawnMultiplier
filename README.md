@@ -11,7 +11,7 @@
 
 - `Native Composition`：游戏想怎么刷就怎么刷
 - `Light-Medium Bias`：刷怪更倾向于刷中轻甲
-- `Preview Low Budget Fast Cadence`：遭遇预算降至原版 0.4x 且强制正值 override 使用缩放后的基础预算；敌人增援冷却钳制到 2 秒；巡逻刷新冷却与巡逻队数 3x、巡逻队规模 10x；增援模板权重偏向重甲；巡逻/散兵刷新间隔改为 0.0-0.1 秒，组规模上限保持 10x，守军预算和刷新机制保持原版；日志改为每秒一条的时间线
+- `Preview Low Budget Fast Cadence`：遭遇预算降至原版 0.4x 且强制正值 override 使用缩放后的基础预算；敌人增援冷却钳制到 2 秒；巡逻刷新冷却 3x、巡逻队数与巡逻队规模各 6x；增援模板权重偏向重甲；巡逻/散兵刷新间隔改为 0.0-0.1 秒，组规模上限保持 10x，守军预算和刷新机制保持原版；日志改为每秒一条的时间线
 
 三个版本使用同一个资源 ID，只能安装其中一个。
 
@@ -19,7 +19,7 @@
 
 1. 关闭游戏。
 2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases) 并设置为最高优先级。
-3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`、`Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip` 或 `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip`，三选一。
+3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`、`Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip` 或 `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip`，三选一。
 4. 重新部署并重启游戏。
 
 ## 🤝 参与贡献
@@ -53,9 +53,9 @@ Both variants use the native Encounter budget override at `6x`, scale nonzero pe
 
 The mod changes writable private data only and does not modify executable pages. Illuminate GuardForce budget is reduced to one quarter during initialization so static defenders leave capacity under the shared native population gate. Native population gates, position checks, template availability, and queue processing remain active.
 
-Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install exactly one of `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`, `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`, or `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
+Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install exactly one of `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`, `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`, or `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
 
-A fast-cadence preview package tests the opposite density split: `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip` lowers the reinforcement budget to `0.4x` while forcing a positive `cfg+0x78` override to the scaled director base, multiplies four `MissionDifficultySettings` curves by `3.0` inside the same `0x438` row - `encounter_cooldown_rate` (`cfg+0x164`), `patrol_count_max` (`cfg+0x1A0`), `patrol_spawn_cooldown_rate` (`cfg+0x1DC`) and `travelers_max_unit_count_multiplier` (`cfg+0x3F8`, units per patrol wave, scaled to `10x`), then biases Encounter candidate weights toward the costliest templates (`0.25x` for the cheapest half, `1.0x` for the middle, `4.0x` for the costliest quintile) so heavier squads are picked more often, clamps the reinforcement cooldown at `director+0x399D8` to two seconds, runs timed Patrol/Straggler intervals at `0.0-0.1` seconds, keeps the `10x` cap and group expansion, and leaves GuardForce/static defenders native. The log is a one-second timeline and records `tv=`, the cooldown delta, the two scheduling counters that gate the timed scheduler, the Patrol/Straggler deadline deltas, the scheduler enable flags and a probe of nearby director timers. It uses the same resource ID, so install it instead of either v16 variant.
+A fast-cadence preview package tests the opposite density split: `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip` lowers the reinforcement budget to `0.4x` while forcing a positive `cfg+0x78` override to the scaled director base, scales four `MissionDifficultySettings` curves inside the same `0x438` row - `encounter_cooldown_rate` (`cfg+0x164`) `3x`, `patrol_count_max` (`cfg+0x1A0`) `6x`, `patrol_spawn_cooldown_rate` (`cfg+0x1DC`) `3x`, and `travelers_max_unit_count_multiplier` (`cfg+0x3F8`, units per patrol wave) `6x`, then biases Encounter candidate weights toward the costliest templates (`0.25x` for the cheapest half, `1.0x` for the middle, `4.0x` for the costliest quintile) so heavier squads are picked more often, clamps the reinforcement cooldown at `director+0x399D8` to two seconds, runs timed Patrol/Straggler intervals at `0.0-0.1` seconds, keeps the `10x` cap and group expansion, and leaves GuardForce/static defenders native. The log is a one-second timeline and records `tv=`, the cooldown delta, the two scheduling counters that gate the timed scheduler, the Patrol/Straggler deadline deltas, the scheduler enable flags and a probe of nearby director timers. It uses the same resource ID, so install it instead of either v16 variant.
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 

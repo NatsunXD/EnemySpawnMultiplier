@@ -34,10 +34,10 @@ VARIANTS = {
         'template_bias': True,
     },
     'preview-low-budget-patrol': {
-        'revision': 'data-v16.13-preview-low-budget-patrol',
-        'public_version': 'v16.13-preview',
+        'revision': 'data-v16.14-preview-low-budget-patrol',
+        'public_version': 'v16.14-preview',
         'name': 'Enemy Spawn Multiplier Preview Low Budget Fast Cadence',
-        'description': 'Heavy-focus fast-cadence preview: forces the effective Encounter budget to 0.4x of the scaled director base, clamps the enemy reinforcement cooldown at director+0x399D8 to two seconds, scales the encounter-cooldown, patrol-count, patrol-cooldown and patrol-unit-count curves by 3/3/3/10, and biases Encounter template weights toward the costliest candidates so heavier units are chosen more often. Timed Patrol/Straggler intervals are pinned at 0.0-0.1 seconds with the group clamp at 10x. GuardForce/static defenders stay on the native budget and schedule, executable code is unchanged, and every candidate weight is restored from a stored baseline so repeated updates cannot stack. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Heavy-focus fast-cadence preview: forces the effective Encounter budget to 0.4x of the scaled director base, clamps the enemy reinforcement cooldown at director+0x399D8 to two seconds, scales the encounter-cooldown curve by 3x, the patrol-count and patrol-unit-count curves by 6x, and the patrol-cooldown curve by 3x, and biases Encounter template weights toward the costliest candidates so heavier units are chosen more often. Timed Patrol/Straggler intervals are pinned at 0.0-0.1 seconds with the group clamp at 10x. GuardForce/static defenders stay on the native budget and schedule, executable code is unchanged, and every candidate weight is restored from a stored baseline so repeated updates cannot stack. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
         'overrides': {
             'budget_multiplier': 0.4,
@@ -51,9 +51,9 @@ VARIANTS = {
             'traveler_cooldown_max': 0.0,
             'modifier_scale_enabled': True,
             'modifier_encounter_cooldown': 3.0,
-            'modifier_patrol_count': 3.0,
+            'modifier_patrol_count': 6.0,
             'modifier_patrol_cooldown': 3.0,
-            'modifier_travelers_max_unit': 10.0,
+            'modifier_travelers_max_unit': 6.0,
             'template_bias_light': 0.25,
             'template_bias_medium': 1.0,
             'template_bias_heavy': 4.0,
@@ -162,7 +162,7 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 1713 if key == 'preview-low-budget-patrol' else 16,
+        'version': 1714 if key == 'preview-low-budget-patrol' else 16,
         'public_version': variant['public_version'],
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],

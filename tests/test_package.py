@@ -39,14 +39,14 @@ def main():
         expected_versions = {
             'data-v16-native': 'v16',
             'data-v16-light-medium': 'v16',
-            'data-v16.13-preview-low-budget-patrol': 'v16.13-preview',
+            'data-v16.14-preview-low-budget-patrol': 'v16.14-preview',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v16.13-preview-low-budget-patrol':
+        if provenance['revision'] == 'data-v16.14-preview-low-budget-patrol':
             assert change['budget_multiplier'] == 0.4
             assert change['budget_override_multiplier'] == 0.4
             assert change['derive_override_from_base'] is False
@@ -59,9 +59,9 @@ def main():
             assert change['traveler_cooldown_enabled'] is False
             assert change['modifier_scale_enabled'] is True
             assert change['modifier_scales'] == {'encounter_cooldown': 3.0,
-                                                 'patrol_count': 3.0,
+                                                 'patrol_count': 6.0,
                                                  'patrol_cooldown': 3.0,
-                                                 'travelers_max_unit': 10.0}
+                                                 'travelers_max_unit': 6.0}
             assert change['modifier_blocks']['encounter_cooldown_rate'] == '0x164'
             assert change['modifier_blocks']['patrol_count_max'] == '0x1A0'
             assert change['modifier_blocks']['patrol_spawn_cooldown_rate'] == '0x1DC'

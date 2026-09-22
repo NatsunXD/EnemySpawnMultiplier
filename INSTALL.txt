@@ -1,65 +1,67 @@
-Enemy Spawn Multiplier - v16 and v16.13 preview packages
+Enemy Spawn Multiplier - v16 and v16.14 preview packages
 
 Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
 and install exactly one package:
 
 - Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
 - Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
-- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.13-preview.zip
+- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip
 
 Install and enable the official Bingus Shared Loader v15 or newer, deploy with
 HDArsenal or HD2MM, and restart the game. All packages use the same resource ID
 and cannot be combined.
 
-v16.13
+v16.14
 ------
 
-Reinforcement budget raised from 0.2x to 0.4x. Everything else is carried over
-from v16.12, which was confirmed in game:
+Patrol pressure rebalanced. Patrol squad size drops from 10x to 6x and patrol
+count rises from 3x to 6x, so patrols appear as often as before but in more,
+smaller groups.
 
-- Reinforcement cooldown clamped at 2 s via director+0x399D8.
-- Patrol spawn cooldown 3x, patrol count 3x (cfg+0x1DC, cfg+0x1A0).
-- Patrol squad size 10x via cfg+0x3F8
-  travelers_max_unit_count_multiplier. game.dll+0x943E40 computes a patrol wave
-  as round(base_units * that curve).
-- Encounter templates biased toward heavier squads: candidates are ranked by cost
-  per planned unit, the cheapest half drops to 0.25x weight, the middle 30% stays
-  at 1.0x, and the costliest 20% rises to 4.0x.
-- The effective cfg+0x78 override is forced to the already-scaled director base,
-  so a positive native override cannot bypass the budget reduction.
-- Timed Patrol/Straggler intervals pinned at 0.0-0.1 s, nonzero per-type caps and
-  the group clamp at 10x, GuardForce/static defenders fully native, no
-  executable-code changes.
+Current preview settings:
 
-What to expect from 0.4x
-------------------------
+| Setting | Value |
+|---|---|
+| Reinforcement budget (`cfg+0x78` and `director+0x518B0`) | `0.4x` |
+| Enemy reinforcement cooldown clamp (`director+0x399D8`) | `2 s` |
+| `cfg+0x164` encounter_cooldown_rate_modifier | `3x` |
+| `cfg+0x1A0` patrol_count_max_modifier | `6x` |
+| `cfg+0x1DC` patrol_spawn_cooldown_rate_modifier | `3x` |
+| `cfg+0x3F8` travelers_max_unit_count_multiplier | `6x` |
+| Encounter candidate weighting | cheapest 50% `0.25x`, middle 30% `1.0x`, costliest 20% `4.0x` |
+| Timed Patrol/Straggler intervals | `0.0-0.1 s` |
+| Nonzero per-type caps and group clamp | `10x` |
+| GuardForce / static defenders | native |
 
-The budget is a point total spent on Encounter template entries, not a unit count,
-and one template entry can carry several units. Going 0.2x -> 0.4x therefore
-roughly doubles the points available per wave, which should mean more template
-entries per wave and/or larger entries, rather than a simple doubling of visible
-units.
+The effective `cfg+0x78` override is still forced to the already-scaled director
+base, so a positive native override cannot bypass the budget reduction. Timed
+Patrol/Straggler intervals remain pinned but are inert on this build, because the
+timed scheduler branch is unreachable. Executable code is unchanged throughout.
 
-Two interactions to watch:
+Why the split moved
 
-- Each wave now has more points to spend, so the heavy-tier bias (4.0x on the
-  costliest 20%) has more room to actually select expensive templates. Higher
-  budget and heavy bias reinforce each other here, unlike the 0.2x build where
-  points were scarce.
-- More/larger waves reach the shared native population gate sooner. Position
-  queries, the 96-slot queue, the effective-70 term and the 448 component cap all
-  still apply. If waves start getting rejected under sustained pressure, that gate
-  is the reason, not the curve writes.
+6x squad size with 6x patrol count keeps roughly the same total patrol population
+as the previous 10x/3x combination while spending far fewer units per group. That
+matters because the shared native gate counts individual components: a wave of 11
+base units at 10x is up to 110 entities, whereas at 6x it is up to 66. Halving the
+per-group peak while doubling how many groups can exist gives the same sustained
+patrol pressure with more headroom against the component-448 term.
+
+What to watch
+
+The 448 gate was never reached in the captured vanilla sessions - peak 97 against a
+limit of 448 - but 10x patrol waves plus 3x count could have consumed that margin.
+With 6x/6x the per-wave peak halves, so this build should stay further from the
+gate while feeling similar in volume.
 
 Reading the log
 ---------------
 
-- p=   Encounter budget current/original. With a native 600 this now reads
-       240.0/600.0.
+- p=   Encounter budget current/original. With a native 600 this reads 240.0/600.0.
 - o=   effective cfg+0x78 override. Expect 240.00.
-- ms=  applied curve scales, expected 3.0/3.0/3.0/10.0.
+- ms=  applied curve scales, expected 3.0/6.0/3.0/6.0.
 - mv=  live head float of each scaled curve. With a baseline of 1.0 this reads
-       3.00/3.00/3.00/10.00.
+       3.00/6.00/3.00/6.00.
 - w=   biased/available candidates, or the fallback reason.
 - e=, a=, b=, d=, fl=  reinforcement deadline and timed-scheduler gate inputs.
 
