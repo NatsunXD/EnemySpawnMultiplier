@@ -33,11 +33,11 @@ VARIANTS = {
         'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. Unsupported faction template layouts fall back to native weights instead of stopping the core tuning. Illuminate static-guard budget is reduced to preserve reinforcement capacity. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
     },
-    'preview-low-budget-patrol': {
-        'revision': 'data-v16.14-preview-low-budget-patrol',
-        'public_version': 'v16.14-preview',
-        'name': 'Enemy Spawn Multiplier Preview Low Budget Fast Cadence',
-        'description': 'Heavy-focus fast-cadence preview: forces the effective Encounter budget to 0.4x of the scaled director base, clamps the enemy reinforcement cooldown at director+0x399D8 to two seconds, scales the encounter-cooldown curve by 3x, the patrol-count and patrol-unit-count curves by 6x, and the patrol-cooldown curve by 3x, and biases Encounter template weights toward the costliest candidates so heavier units are chosen more often. Timed Patrol/Straggler intervals are pinned at 0.0-0.1 seconds with the group clamp at 10x. GuardForce/static defenders stay on the native budget and schedule, executable code is unchanged, and every candidate weight is restored from a stored baseline so repeated updates cannot stack. Requires the official Bingus Shared Loader v15 or newer.',
+    'fast-cadence': {
+        'revision': 'data-v17-fast-cadence',
+        'public_version': 'v17',
+        'name': 'Enemy Spawn Multiplier Fast Cadence',
+        'description': 'Behaviour-focused spawn retuning. Enemy reinforcement arrives on a much shorter cooldown, and both reinforcement waves and their point budget are steered toward heavier units, while patrols spawn more frequently, in greater numbers and in larger groups. The per-wave reinforcement point budget is reduced, so a wave is composed of fewer but heavier units rather than being larger overall. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
         'overrides': {
             'budget_multiplier': 0.4,
@@ -100,7 +100,7 @@ def main():
             print(run([sys.executable, Path(__file__), key]).strip())
         return
     if len(sys.argv) != 2 or sys.argv[1] not in VARIANTS:
-        raise SystemExit('Usage: build.py [base|light-medium|preview-low-budget-patrol]')
+        raise SystemExit('Usage: build.py [base|light-medium|fast-cadence]')
     key = sys.argv[1]
     variant = VARIANTS[key]
     revision = variant['revision']
@@ -143,8 +143,8 @@ def main():
                              overrides=variant.get('overrides'))
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')
     tests = run([LUA, TESTS / 'test_data.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
-    if key == 'preview-low-budget-patrol':
-        tests += '\n' + run([LUA, TESTS / 'test_preview.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
+    if key == 'fast-cadence':
+        tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
     (build / 'offline-tests.txt').write_text(tests, encoding='utf-8')
     data = build / 'data'
     data.mkdir(exist_ok=True)
@@ -162,7 +162,7 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 1714 if key == 'preview-low-budget-patrol' else 16,
+        'version': 17 if key == 'fast-cadence' else 16,
         'public_version': variant['public_version'],
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],

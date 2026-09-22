@@ -86,7 +86,7 @@ config multipliers, and hands the result to the candidate selector at
 value directly and bypasses `0x518B0` entirely. `cfg+0x78` is
 `forced_encounter_point_amount`, default `-1`. Because of that bypass, editing
 `0x518B0` alone is not sufficient whenever a mission ships a positive override;
-the preview profile therefore also writes `cfg+0x78` itself.
+the Fast Cadence profile therefore also writes `cfg+0x78` itself.
 
 `0x94B4BC` truncates the budget to an integer and `0x94BB2E` clamps each
 candidate cost with `max(cost, 1.0)`; the constant at `game.dll+0x211C5B0` was
@@ -102,9 +102,9 @@ out 5 + 4 + 1 + 5. `game.dll+0xD49E70..0xD4B67A` is the evaluator: it blends
 those curves between two source rows with `mulss`/`addss` weighted sums, so the
 live values are per-difficulty and per-progress, not constants.
 
-The four curves below were identified by name, then scaled by `3.0` in the
-preview profile. The two cooldown effects were confirmed in game first; the
-patrol-size curve was added afterwards and is documented in section 4.5.
+The four curves below were identified by name and are scaled by the Fast Cadence
+profile. The two cooldown effects were confirmed in game first; the patrol-size
+curve was added afterwards and is documented in section 4.5.
 
 | Config offset | Field | Effect |
 |---|---|---|
@@ -168,8 +168,8 @@ therefore fifteen floats; the typelib's 20/16/4/20 byte split is a packaging
 artefact of the same fifteen values.
 
 This matters when editing a curve: the value you scale is only the one for the
-currently selected index. Scaling the whole 60-byte block is what the preview
-does, so every progression step and difficulty ends up scaled.
+currently selected index. Scaling the whole 60-byte block is what the Fast Cadence
+profile does, so every progression step and difficulty gets scaled.
 
 ### 4.5 Patrol squad size
 
@@ -209,7 +209,7 @@ untouched:
   (`AiSpawnerComponent.production_queue_limit` at `+0x88`)
 
 Unlike `cfg+0x3F8`, these apply to every spawner type, so scaling them would also
-change outposts and guard forces. They are deliberately not in the preview.
+change outposts and guard forces. They are deliberately not in this profile.
 
 ### 4.7 Cap rows and group clamp
 
@@ -245,7 +245,7 @@ multiplier applied to that candidate's stored baseline weight:
 Cost per planned unit is the closest available proxy for armour weight, so the
 costliest quintile is where the heavy units live. The two profiles use the same
 mechanism with opposite polarity, which is why `Light-Medium Bias` and the
-heavy-focus preview share one code path.
+heavy-focus Fast Cadence profile share one code path.
 
 Idempotence relies on a per-candidate key of
 `index:source_pointer:cost`. A stored baseline is re-adopted only when the live
@@ -289,7 +289,7 @@ which sits in a fragment that is not covered by the PE exception table and runs
 once during mission initialisation. Across three captures the value only drifted
 downward and was never re-armed, so clamping it does nothing.
 
-The v16.7 clamp is still present in the preview profile. It is inert on this
+The v16.7 clamp is still present in the Fast Cadence profile. It is inert on this
 build, is guarded by a writable-private-data check, and does not fail closed when
 the field is unreachable.
 
@@ -331,17 +331,17 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Preview - `data-v16.14-preview-low-budget-patrol`
+### Fast Cadence - `data-v17-fast-cadence`
 
 Reinforcement budget `0.4x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
 
-The budget line has moved 0.1x -> 0.2x -> 0.4x across preview revisions. Only the
-multiplier changes; the write path, the override forcing and the idempotence state
-are the same in all three. Budget is a point total spent on Encounter template
-entries rather than a unit count, so the observed effect of a budget change is a
-change in how many entries a wave can afford, not a proportional change in
-visible units.
+The budget multiplier was tuned across earlier builds of this profile (0.1x,
+then 0.2x, then 0.4x) before this build was promoted. Only the multiplier changes
+between those steps; the write path, the override forcing and the idempotence state are
+identical. Budget is a point total spent on Encounter template entries rather
+than a unit count, so the observable effect of a budget change is how many
+entries a wave can afford, not a proportional change in visible units.
 
 Four curves are scaled: `0x164` encounter cooldown `3.0x`, `0x1A0` patrol count
 `6.0x`, `0x1DC` patrol spawn cooldown `3.0x`, and `0x3F8` units per patrol wave
@@ -415,66 +415,50 @@ second and rotated at 4 MB.
 
 ## 9. Validation status
 
-Offline: 24 synthetic checks on the data path, 8 preview-profile checks, 7 package
-checks. They cover budget and cap scaling, timer clamping, idempotence, config
-resolution, resource and cap-table cloning, template bias, mission rebuilds,
-queue and counter preservation, curve scaling from a stored baseline, re-blend
-recovery, and the failure paths. Package tests verify the manifest, hashes, both
-resource identities, the exact v15 declaration and forwarding target, absence of
-custom DLLs, and absence of executable-page modification APIs.
+Offline: 24 synthetic checks on the data path, 9 Fast Cadence profile checks, and
+7 package checks. They cover budget and cap scaling, timer clamping, idempotence,
+config resolution, resource and cap-table cloning, template bias, mission
+rebuilds, queue and counter preservation, curve scaling from a stored baseline,
+re-blend recovery, heavy-tier candidate reweighting, and the failure paths.
+Package checks verify the manifest, hashes, both resource identities, the exact
+v15 declaration and forwarding target, absence of custom DLLs, and absence of
+executable-page modification APIs.
 
-In game: the preview profile's two target behaviours - shorter enemy
-reinforcement cooldown and shorter patrol refresh cooldown - were confirmed on
-the Terminid front. That confirms the polarity reading in section 4.3 and the
-field mapping in section 4.2.
+In game, on the Terminid front, the following were confirmed across earlier builds
+of this configuration line:
 
-The artifact that confirmed both cooldown behaviours is:
+- the enemy reinforcement cooldown is markedly shorter
+- the patrol refresh cooldown is markedly shorter
+- the enlarged patrol squad size was visible through `cfg+0x3F8`
+- the heavy-tier candidate weighting changed what the waves are made of
+
+Those results confirm the polarity reading in section 4.3 and the field mapping in
+section 4.2.
+
+Artifacts along this line, oldest first:
 
 ```text
+# confirmed the two cooldown behaviours
 releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.10-preview.zip
 SHA-256 A2D9FD1F68A7882491B19058D7E287CC23B130DE30B44E583E153CCA063D2CE1
-gameplay payload data/9ba626afa44a3aa3.patch_0
-SHA-256 3000539AB5260591891E095C669B976AF1408508C38D95E534DC978AEF1B6170
-```
+gameplay payload SHA-256 3000539AB5260591891E095C669B976AF1408508C38D95E534DC978AEF1B6170
 
-The build that confirmed the 10x patrol squad size and the heavy-tier candidate
-weighting, and therefore the current line of preview tuning, is:
-
-```text
+# confirmed the enlarged patrol squads and the heavy-tier weighting
 releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.12-preview.zip
 SHA-256 E7CF302E99566B30E97CE9C971A3BB34C4E33E40E1A227015250F6A1F6B3CFE2
-gameplay payload data/9ba626afa44a3aa3.patch_0
-SHA-256 391B0EF4DDEB27D918999004489EA80674611EE5F40DF2BF67D91814D9D9C3E7
+gameplay payload SHA-256 391B0EF4DDEB27D918999004489EA80674611EE5F40DF2BF67D91814D9D9C3E7
+
+# promoted release
+releases/Enemy-Spawn-Multiplier-Fast-Cadence-v17.zip
+SHA-256 1FAA1DF6E0B8F30DADE941614DBE871DA6DD4BB39B6BAEDB1274D76A640C1793
+gameplay payload SHA-256 F176D4D5C8A5DE499B11B0C8F3BA65B3D21D638F6A7BA80C390CC388A9FDF907
 ```
 
-The current preview build rebalances the patrol pair to 6x/6x:
+The v16 pair carries no curve scaling, no traveler write, no deadline clamp and no
+candidate reweighting, so its behaviour is the pre-existing data profile.
 
-```text
-releases/Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip
-SHA-256 1DD05E101A2A328B9DB1A867A59AD63877D70B23B0F7AD0AFD0B17879D99B2E6
-gameplay payload data/9ba626afa44a3aa3.patch_0
-SHA-256 0A2B3B02A5243FBAEC6B6FABB81709161AF5595BC828FB71624778AE796656AD
-```
-
-The v16 pair carries no curve scaling, no traveler write, no deadline clamp and
-no candidate reweighting, so its behaviour is the pre-existing 6x data profile;
-its provenance manifest differs only in the extra descriptive metadata fields.
-
-Offline: 24 synthetic checks on the data path, 9 preview-profile checks, 7 package
-checks. The preview suite now also covers heavy-tier reweighting and the
-no-stacking guarantee for candidate weights.
-
-Rebuilding from the same source reproduces that ZIP byte for byte, so the tested
-bytes and the shipped bytes are the same file. The gameplay payload hash is
-recorded separately so a future rebuild that changes only packaging metadata can
-still be compared against what was actually played.
-
-Live confirmation now covers: the enemy reinforcement cooldown, the patrol refresh
-cooldown, the direction of the `_rate_` convention, the 10x patrol squad size via
-`cfg+0x3F8`, and the heavy-tier candidate weighting with the `0.25/1.0/4.0`
-density bands. All were on the Terminid front.
-
-Not yet exercised live: the `0.4x` budget step, the 6x/6x patrol split, Automaton
-and Illuminate, the Illuminate GuardForce `0.25x` path, mission-to-mission
-transitions inside one process, and host versus solo differences.
-`runtime_verified` stays `false` in the manifests until those are covered.
+The promoted release has not itself been played: its budget step and its patrol
+split are both new relative to the builds listed as confirmed above.
+`runtime_verified` therefore stays `false` in the manifests. Also not yet exercised
+live: Automaton and Illuminate, the Illuminate GuardForce adjustment, mission-to-
+mission transitions inside one process, and host versus solo differences.

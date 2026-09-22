@@ -1,26 +1,31 @@
 # Enemy Spawn Multiplier
 
 ## 中文说明
-目前还不是很完善，主要是自己跟朋友一起玩嫌怪太少了所以用AI来搓了一个
+
+目前还不是很完善，主要是自己跟朋友一起玩嫌怪太少了所以用AI来搓了一个。
 
 毕竟修改了游戏刷怪相关的机制，所以最好是自己玩或者和朋友一起玩哦，不要去恶搞路人！！！
 
-具体改动： 延长了拉烟时间以及刷怪的数量、减少了巡逻队刷新的CD、增加了刷怪上限
+本模组只修改游戏进程中的可写私有数据，不改动可执行代码，也不会调用游戏的原生刷怪接口。
 
-### V15往后版本已适配原版Bingus Shared Loader v15 或更新版本
+### 三个版本
 
-- `Native Composition`：游戏想怎么刷就怎么刷
-- `Light-Medium Bias`：刷怪更倾向于刷中轻甲
-- `Preview Low Budget Fast Cadence`：遭遇预算降至原版 0.4x 且强制正值 override 使用缩放后的基础预算；敌人增援冷却钳制到 2 秒；巡逻刷新冷却 3x、巡逻队数与巡逻队规模各 6x；增援模板权重偏向重甲；巡逻/散兵刷新间隔改为 0.0-0.1 秒，组规模上限保持 10x，守军预算和刷新机制保持原版；日志改为每秒一条的时间线
+三个版本使用同一个资源 ID，只能安装其中一个，取向不同：
 
-三个版本使用同一个资源 ID，只能安装其中一个。
+- `Native Composition`：整体提高刷怪强度，保持游戏原生的刷怪组合权重。
+- `Light-Medium Bias`：整体提高刷怪强度，并让刷怪更倾向于中轻甲单位。
+- `Fast Cadence`：把重心从"单波规模"移到"节奏与构成"。敌人增援的冷却明显缩短，增援波次与单波的点数预算都更偏向重甲单位；巡逻队出现得更频繁、数量更多、规模更大。由于单波增援的点数预算下调，每波由更少但更重的单位组成，而不是把每一波整体堆大。
+
+`Fast Cadence` 与另外两个版本的取向相反：它追求单位持续、快速地出现，而不是单波堆量。
 
 ### 安装
 
 1. 关闭游戏。
 2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases) 并设置为最高优先级。
-3. 在 HDArsenal 或 HD2MM 中导入 `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`、`Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip` 或 `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip`，三选一。
+3. 在 HDArsenal 或 HD2MM 中导入 releases 页面里的任意一个包，三选一。
 4. 重新部署并重启游戏。
+
+模组会把诊断信息追加写入 `%LOCALAPPDATA%/EnemySpawnMultiplier.log`。
 
 ## 🤝 参与贡献
 
@@ -47,15 +52,17 @@
 <details>
 <summary>English</summary>
 
-v16 targets Steam build `24826606` / EXE `1.8.45317.0` and provides two mutually exclusive packages. Native Composition preserves native Encounter template weights. Light-Medium Bias ranks supported Encounter candidates by cost per planned unit using their inline composition rows and falls back to native weights when a faction uses an incompatible layout.
+Three mutually exclusive packages share one resource ID, so install exactly one.
 
-Both variants use the native Encounter budget override at `6x`, scale nonzero per-type caps and the group clamp to `10x`, and divide Patrol/Straggler intervals by `10`. Future deadlines longer than the new maximum interval are clamped so the initial native delay and failed-position-query backoff do not hide the faster configuration. The desired target stays native because scaling it can make the native combined-100 rejection fire more often.
+- `Native Composition` raises overall spawn pressure and keeps the game's native Encounter composition weights.
+- `Light-Medium Bias` raises overall spawn pressure and steers Encounter composition toward lighter and medium units.
+- `Fast Cadence` shifts the emphasis from wave size to cadence and composition. Enemy reinforcement arrives on a much shorter cooldown, and both the wave composition and its point budget are steered toward heavier units. Patrols appear more frequently, in greater numbers, and in larger groups. Because the per-wave reinforcement point budget is reduced, a wave is made of fewer but heavier units rather than being larger overall.
 
-The mod changes writable private data only and does not modify executable pages. Illuminate GuardForce budget is reduced to one quarter during initialization so static defenders leave capacity under the shared native population gate. Native population gates, position checks, template availability, and queue processing remain active.
+`Fast Cadence` deliberately opposes the other two: it aims for a steady, rapid stream of units instead of large individual waves.
 
-Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases/tag/v15), then install exactly one of `Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip`, `Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip`, or `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip`. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
+Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases), then install exactly one of the packages published on the releases page. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
 
-A fast-cadence preview package tests the opposite density split: `Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip` lowers the reinforcement budget to `0.4x` while forcing a positive `cfg+0x78` override to the scaled director base, scales four `MissionDifficultySettings` curves inside the same `0x438` row - `encounter_cooldown_rate` (`cfg+0x164`) `3x`, `patrol_count_max` (`cfg+0x1A0`) `6x`, `patrol_spawn_cooldown_rate` (`cfg+0x1DC`) `3x`, and `travelers_max_unit_count_multiplier` (`cfg+0x3F8`, units per patrol wave) `6x`, then biases Encounter candidate weights toward the costliest templates (`0.25x` for the cheapest half, `1.0x` for the middle, `4.0x` for the costliest quintile) so heavier squads are picked more often, clamps the reinforcement cooldown at `director+0x399D8` to two seconds, runs timed Patrol/Straggler intervals at `0.0-0.1` seconds, keeps the `10x` cap and group expansion, and leaves GuardForce/static defenders native. The log is a one-second timeline and records `tv=`, the cooldown delta, the two scheduling counters that gate the timed scheduler, the Patrol/Straggler deadline deltas, the scheduler enable flags and a probe of nearby director timers. It uses the same resource ID, so install it instead of either v16 variant.
+The mod changes writable private data only and does not modify executable pages. Native population gates, position checks, template availability and queue processing remain active. Diagnostics are appended to `%LOCALAPPDATA%/EnemySpawnMultiplier.log`.
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 

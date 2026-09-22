@@ -1,10 +1,11 @@
--- Preview profile checks: low Encounter budget, near-zero timed paths, native GuardForce.
+-- Fast Cadence profile checks: reduced Encounter budget, near-zero timed paths, native GuardForce,
+-- scaled cooldown/patrol curves and heavy-focus candidate weighting.
 local source, build, executable_hash = assert(arg[1]), assert(arg[2]), assert(arg[3])
 local ffi = require('ffi')
 local create_api = assert(loadfile(source .. '/windows_api.lua'))()
 local patch = assert(loadfile(source .. '/spawn_patch.lua'))()
 
--- Mirror the overrides emitted by scripts/module.py for the preview variant.
+-- Mirror the overrides emitted by scripts/module.py for the Fast Cadence variant.
 patch.budget_multiplier = 0.4
 patch.budget_override_multiplier = 0.4
 patch.derive_override_from_base = false
@@ -264,7 +265,7 @@ assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 6.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 6.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 30))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 60))
-pass('preview lowers Encounter to 0.4x and clamps the reinforcement cooldown to two seconds')
+pass('fast cadence lowers Encounter to 0.4x and clamps the reinforcement cooldown to two seconds')
 
 local settled_writes = writes
 ok, reason, active = patch.apply(api, game)
@@ -275,7 +276,7 @@ assert_config(0, 0.1, 0, 0.1, 100, 30)
 assert(get_u64(director + patch.encounter_deadline_offset) == 3000000)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 30))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 60))
-pass('preview budget, interval and cooldown writes are idempotent')
+pass('fast cadence budget, interval and cooldown writes are idempotent')
 
 -- A pending reinforcement cooldown that is already due or inside the new window
 -- is left untouched, and an unwritable field fails closed instead of half-applying.
@@ -297,7 +298,7 @@ assert(patch.detail:find('n=spawn_encounter_timer_not_writable_private_data', 1,
 encounter_deadline_unwritable = false
 pass('cooldown clamp leaves due deadlines alone and reports an unwritable field')
 
--- A strict preview ignores the native override value and forces the resolved
+-- A strict Fast Cadence profile ignores the native override value and forces the resolved
 -- config to the already-scaled director base, preventing a positive override
 -- from bypassing the 0.4x budget.
 director_present = false
@@ -311,7 +312,7 @@ local override_writes = writes
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == override_writes)
 assert(approx(get_f32(director + patch.cfg_base_offset + patch.cfg_override_offset), 40))
-pass('strict preview forces the effective override to the scaled base and remains idempotent')
+pass('strict fast cadence forces the effective override to the scaled base and remains idempotent')
 
 -- Difficulty modifier blocks must scale from the stored baseline. A second pass
 -- over the already-scaled row must not multiply them again.
@@ -342,7 +343,7 @@ assert(ok and active)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 12.0))
 pass('a re-blended modifier block is re-scaled once from its new native value')
 
--- A config already in the preview state must not multiply its group or intervals again.
+-- A config already in the Fast Cadence state must not multiply its group or intervals again.
 director_present = false
 assert(patch.apply(api, game))
 mission(faction_caps(45, 2000), 100, 600)
@@ -352,9 +353,9 @@ assert(ok and active)
 assert_config(0, 0.1, 0, 0.1, 100, 30)
 assert(approx(get_f32(director + patch.points_offset), 40))
 assert(approx(get_f32(director + patch.points_offset + 4), 600))
-pass('preview does not stack on an already-scaled config')
+pass('fast cadence does not stack on an already-scaled config')
 
--- A zero maximum interval would make the native path skip; the preview must
+-- A zero maximum interval would make the native path skip; the Fast Cadence profile must
 -- reject that layout and leave the config untouched rather than disabling spawns.
 director_present = false
 assert(patch.apply(api, game))
@@ -366,7 +367,7 @@ assert(ok and active and reason == 'spawn_multiplier_partial')
 assert(patch.detail:find('spawn_config_layout_mismatch', 1, true))
 assert(ffi.string(director + patch.cfg_base_offset + 0x38, 0x1c) == cfg_before)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x3c), 0))
-pass('preview rejects zero maximum intervals instead of disabling the timed path')
+pass('fast cadence rejects zero maximum intervals instead of disabling the timed path')
 
 -- Heavy-focus bias: candidates are ranked by cost per planned unit, so the
 -- costliest quintile is the heavy tier. It must gain weight while the cheapest
@@ -396,4 +397,4 @@ assert(approx(candidate_weight(4), 4.0))
 assert(approx(candidate_weight(0), 0.25))
 pass('heavy tier candidates gain weight and the bias does not stack')
 
-print(count .. ' preview profile checks passed; no executable code was modified.')
+print(count .. ' fast cadence profile checks passed; no executable code was modified.')

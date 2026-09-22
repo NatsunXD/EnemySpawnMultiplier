@@ -2,10 +2,11 @@
 -- Encounter points are a per-reinforcement composition budget from
 -- director+0x518B0, not a remaining pool. Timed Patrol/Straggler frequency comes
 -- from the resolved 0x438 config at director+0x519A4. The v16 profiles raise the
--- Encounter budget and shorten both timed paths. The preview profile lowers the
+-- Encounter budget and shorten both timed paths. The Fast Cadence profile lowers
+-- the
 -- Encounter budget while driving the timed paths to their positive scheduling
 -- floor, and can leave GuardForce entirely native. A zero maximum interval makes
--- the native code skip that timed path, so the preview uses 0.0-0.1 seconds.
+-- the native code skip that timed path, so that profile pins 0.0-0.1 seconds.
 -- Zero per-type cap rows are a native skip. Population counters and executable
 -- code remain read-only.
 local ffi

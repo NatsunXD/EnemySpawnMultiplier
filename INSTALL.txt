@@ -1,69 +1,41 @@
-Enemy Spawn Multiplier - v16 and v16.14 preview packages
+Enemy Spawn Multiplier
 
-Close the game before upgrading. Remove previous Enemy Spawn Multiplier entries
-and install exactly one package:
+Close the game before installing or upgrading. Remove previous Enemy Spawn
+Multiplier entries, then install exactly one package. All packages share one
+resource ID and cannot be combined.
 
-- Enemy-Spawn-Multiplier-6x-Native-Composition-v16.zip
-- Enemy-Spawn-Multiplier-6x-Light-Medium-Bias-v16.zip
-- Enemy-Spawn-Multiplier-Preview-Low-Budget-Fast-Cadence-v16.14-preview.zip
+What the packages do
+--------------------
 
-Install and enable the official Bingus Shared Loader v15 or newer, deploy with
-HDArsenal or HD2MM, and restart the game. All packages use the same resource ID
-and cannot be combined.
+- Native Composition keeps the game's native Encounter composition weights and
+  raises overall spawn pressure.
+- Light-Medium Bias raises overall spawn pressure and steers Encounter
+  composition toward lighter and medium units.
+- Fast Cadence shifts the emphasis from wave size to cadence and composition.
+  Enemy reinforcement arrives on a much shorter cooldown. Both the wave
+  composition and its point budget are steered toward heavier units, so a wave
+  is made of fewer but heavier units rather than being larger overall. Patrols
+  appear more frequently, in greater numbers, and in larger groups.
 
-v16.14
-------
+The mod changes writable private data only. It does not modify executable code
+and does not call native spawn functions. Native population gates, position
+checks, template availability and queue processing all remain active.
 
-Patrol pressure rebalanced. Patrol squad size drops from 10x to 6x and patrol
-count rises from 3x to 6x, so patrols appear as often as before but in more,
-smaller groups.
+Install
+-------
 
-Current preview settings:
+1. Close the game.
+2. Install and enable the official Bingus Shared Loader v15 or newer
+   (https://github.com/CowboyBingus/BingusSharedLoader/releases) and give it the
+   winning startup priority.
+3. Import exactly one of the packages published on the releases page into
+   HDArsenal or HD2MM.
+4. Deploy, then start the game.
 
-| Setting | Value |
-|---|---|
-| Reinforcement budget (`cfg+0x78` and `director+0x518B0`) | `0.4x` |
-| Enemy reinforcement cooldown clamp (`director+0x399D8`) | `2 s` |
-| `cfg+0x164` encounter_cooldown_rate_modifier | `3x` |
-| `cfg+0x1A0` patrol_count_max_modifier | `6x` |
-| `cfg+0x1DC` patrol_spawn_cooldown_rate_modifier | `3x` |
-| `cfg+0x3F8` travelers_max_unit_count_multiplier | `6x` |
-| Encounter candidate weighting | cheapest 50% `0.25x`, middle 30% `1.0x`, costliest 20% `4.0x` |
-| Timed Patrol/Straggler intervals | `0.0-0.1 s` |
-| Nonzero per-type caps and group clamp | `10x` |
-| GuardForce / static defenders | native |
+Diagnostics are appended to %LOCALAPPDATA%/EnemySpawnMultiplier.log.
 
-The effective `cfg+0x78` override is still forced to the already-scaled director
-base, so a positive native override cannot bypass the budget reduction. Timed
-Patrol/Straggler intervals remain pinned but are inert on this build, because the
-timed scheduler branch is unreachable. Executable code is unchanged throughout.
+Uninstall
+---------
 
-Why the split moved
-
-6x squad size with 6x patrol count keeps roughly the same total patrol population
-as the previous 10x/3x combination while spending far fewer units per group. That
-matters because the shared native gate counts individual components: a wave of 11
-base units at 10x is up to 110 entities, whereas at 6x it is up to 66. Halving the
-per-group peak while doubling how many groups can exist gives the same sustained
-patrol pressure with more headroom against the component-448 term.
-
-What to watch
-
-The 448 gate was never reached in the captured vanilla sessions - peak 97 against a
-limit of 448 - but 10x patrol waves plus 3x count could have consumed that margin.
-With 6x/6x the per-wave peak halves, so this build should stay further from the
-gate while feeling similar in volume.
-
-Reading the log
----------------
-
-- p=   Encounter budget current/original. With a native 600 this reads 240.0/600.0.
-- o=   effective cfg+0x78 override. Expect 240.00.
-- ms=  applied curve scales, expected 3.0/6.0/3.0/6.0.
-- mv=  live head float of each scaled curve. With a baseline of 1.0 this reads
-       3.00/6.00/3.00/6.00.
-- w=   biased/available candidates, or the fallback reason.
-- e=, a=, b=, d=, fl=  reinforcement deadline and timed-scheduler gate inputs.
-
-To uninstall, close the game, disable this mod, purge deployment, and redeploy
-the remaining mods.
+Close the game, disable the mod, purge deployment, then redeploy the remaining
+mods.
