@@ -367,6 +367,92 @@ assert(patch.apply(api, game) and writes == illuminate_writes)
 assert(approx(get_f32(director + patch.points_offset + 4), 150))
 pass('Illuminate GuardForce budget drops to one quarter without changing live counters')
 
+-- Faction comes from the config row's own FactionType field (HiveMindComponent
+-- +0x00), not from the cap-table row count. Drive the field directly and confirm
+-- the label follows it, including the case where the old inference would have
+-- said something else.
+director_present = false
+assert(patch.apply(api, game))
+-- 44 cap rows is the old "terminid" signature, but the row says Illuminate (4).
+mission(faction_caps(44, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30)
+patch.guardforce_write_enabled = true
+put_u32(director + patch.cfg_base_offset + patch.cfg_faction_offset, 4)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and reason == 'spawn_multiplier_ready')
+assert(patch.detail:find('f=illuminate', 1, true),
+    'config-row faction must win over the cap-count guess: ' .. tostring(patch.detail))
+pass('faction is read from the config row and overrides the cap-count guess')
+
+-- And the reverse: 45 cap rows is the old "illuminate" signature, but the row
+-- says Cyborg/Automaton (8), so the guardforce must NOT be scaled.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30)
+put_u32(director + patch.cfg_base_offset + patch.cfg_faction_offset, 8)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and reason == 'spawn_multiplier_ready')
+assert(patch.detail:find('f=automaton', 1, true),
+    'config-row faction must win here too: ' .. tostring(patch.detail))
+assert(approx(get_f32(director + patch.points_offset + 4), 600),
+    'a non-Illuminate row must leave GuardForce untouched')
+pass('a non-Illuminate config row leaves GuardForce unchanged')
+
+-- Bitmask handling: the game stores FactionType as a bitfield, so a combined
+-- value must still resolve rather than being mislabelled as unknown.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(44, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30)
+put_u32(director + patch.cfg_base_offset + patch.cfg_faction_offset, 4 + 1)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(patch.detail:find('f=illuminate', 1, true),
+    'a combined bitmask containing Illuminate must resolve: ' .. tostring(patch.detail))
+pass('a combined FactionType bitmask resolves to a known faction')
+
+-- Fallback still works: an unrecognised field value must fall back to the
+-- cap-count inference and be marked so the log is not misleading.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(61, 1000), 100, 50)
+fill_config(20, 40, 8, 14, 10, 30)
+-- 0x100 has none of the mission-faction bits set (2/4/8), so it must fall back.
+put_u32(director + patch.cfg_base_offset + patch.cfg_faction_offset, 0x100)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(patch.detail:find('f=automaton', 1, true),
+    'fallback must still name the cap-count faction: ' .. tostring(patch.detail))
+assert(patch.detail:find('(?)', 1, true),
+    'a fallback label must be marked: ' .. tostring(patch.detail))
+pass('an unrecognised faction field falls back to cap counts and is marked')
+
+-- A value that is a valid enum member but not a mission faction (Wildlife = 16)
+-- must behave the same way rather than being mistaken for an enemy faction.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(44, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30)
+put_u32(director + patch.cfg_base_offset + patch.cfg_faction_offset, 16)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(patch.detail:find('f=terminid', 1, true),
+    'Wildlife must fall back to the cap-count signature: ' .. tostring(patch.detail))
+pass('a non-mission FactionType falls back to the cap-count signature')
+
+-- Zero (FactionType_None) is not a mission faction, so it must also fall back.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30)
+put_u32(director + patch.cfg_base_offset + patch.cfg_faction_offset, 0)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(patch.detail:find('f=illuminate', 1, true),
+    'None must fall back to the cap-count signature: ' .. tostring(patch.detail))
+pass('FactionType_None falls back to the cap-count signature')
+
 director_present = false
 assert(patch.apply(api, game))
 mission(vanilla, 100, 50)

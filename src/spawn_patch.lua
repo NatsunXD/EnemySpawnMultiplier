@@ -40,9 +40,16 @@ local patch = {
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
     illuminate_guardforce_multiplier = 0.25,
-    -- Cap-table counts last measured on 1.8.45317.0; the section layout is unchanged
-    -- through 1.8.46015.0, so a mismatch still only labels the faction unknown.
-    -- A mismatch only labels the faction unknown and skips Illuminate guard scaling.
+    -- The active faction is read from the resolved config row itself:
+    -- HiveMindComponent+0x00 is `FactionType faction` in the game's own typelib,
+    -- so this is the mission's actual faction rather than an inference.
+    cfg_faction_offset = 0x00,
+    -- FactionType is a bitmask (game typelib, enum/factiontype.go):
+    -- None 0, SuperEarth 1, Bugs 2, Illuminate 4, Cyborg 8, Wildlife 16.
+    faction_bits = {terminid = 2, illuminate = 4, automaton = 8},
+    -- Fallback only, for a row whose faction field is missing or unrecognised:
+    -- cap-table row counts last measured on 1.8.45317.0. A mismatch here only
+    -- labels the faction unknown and skips Illuminate guard scaling.
     faction_cap_counts = {automaton = 61, terminid = 44, illuminate = 45},
     cap_multiplier = 10,
     interval_mode = 'divide',
@@ -255,7 +262,7 @@ local modifier_state = {}
 local mission = {
     director = nil, key = nil, points_original = nil, points_applied = nil,
     guardforce_original = nil, guardforce_applied = nil,
-    cfg = nil, weights = nil,
+    cfg = nil, weights = nil, cfg_address = nil,
 }
 patch.detail = ''
 
@@ -309,6 +316,7 @@ local function reset()
     mission.points_original, mission.points_applied = nil, nil
     mission.guardforce_original, mission.guardforce_applied = nil, nil
     mission.cfg, mission.weights = nil, nil
+    mission.cfg_address = nil
 end
 local function same_pointer(api, first, second)
     return first and second and api.distance(first, second) == 0
@@ -319,7 +327,26 @@ local function in_mission(api, game)
     local mode_bytes = api.read(mode, 12)
     return mode_bytes ~= nil and u32(mode_bytes, 8) ~= 0
 end
-local function faction_name(count)
+-- Read FactionType straight out of the active config row. Returns nil when the
+-- value is not a recognised faction, so the caller can fall back.
+local function faction_from_config(api, address)
+    if not address then return nil end
+    local bytes = api.read(address + patch.cfg_faction_offset, 4)
+    if not bytes then return nil end
+    local raw = u32(bytes, 0)
+    if raw == 0 then return nil end          -- None: not a mission faction
+    -- FactionType is a bitmask. Test each known bit individually so a combined
+    -- value resolves to one faction instead of being mislabelled.
+    for _, name in ipairs({'terminid', 'illuminate', 'automaton'}) do
+        local bits = patch.faction_bits[name]
+        if bits and raw % (bits * 2) >= bits then return name, raw end
+    end
+    return nil, raw
+end
+
+-- Fallback: infer the faction from the active cap-table row count. Kept only for
+-- the case where the config row's faction field is missing or unrecognised.
+local function faction_from_cap_count(count)
     for name, expected in pairs(patch.faction_cap_counts) do
         if count == expected then return name end
     end
@@ -436,7 +463,9 @@ local function scale_guardforce(api, director, guardforce, faction)
         end
         return true, guardforce
     end
-    if faction ~= 'illuminate' or not (guardforce > 0) then return true, guardforce end
+    -- Match on the bare name: a diagnostic suffix must not change behaviour.
+    local bare = type(faction) == 'string' and faction:match('^([%a]+)') or faction
+    if bare ~= 'illuminate' or not (guardforce > 0) then return true, guardforce end
     if not mission.guardforce_original then
         mission.guardforce_original = guardforce
     elseif not near(guardforce, mission.guardforce_original)
@@ -860,6 +889,9 @@ end
 local function scale_config(api, game, director)
     local address, source = resolve_config(api, game, director)
     if not address then return 0, nil, source end
+    -- Remember which row this mission resolved to; the faction field lives in the
+    -- same HiveMindComponent row, so it is read from here rather than guessed.
+    mission.cfg_address = address
     local scaled, first = 0, nil
     mission.cfg = mission.cfg or {}
     local cfg = read_config(api, address)
@@ -1046,6 +1078,7 @@ function patch.apply(api, game)
         mission.points_original, mission.points_applied = nil, nil
         mission.guardforce_original, mission.guardforce_applied = nil, nil
         mission.cfg, mission.weights = nil, nil
+        mission.cfg_address = nil
     end
     local points_bytes = api.read(director + patch.points_offset, 8)
     if not points_bytes then return false, 'spawn_points_unreadable', false end
@@ -1066,8 +1099,13 @@ function patch.apply(api, game)
         or (header_bytes and api.read(director + patch.cap_table_offset, 16) ~= header_bytes)
         or (table_bytes and api.read(header, patch.cap_header_size) ~= table_bytes)
         or (rows and api.read(entries, table_size) ~= rows) then
+        local unstable_faction, unstable_raw = faction_from_config(api, mission.cfg_address)
+        if not unstable_faction then
+            unstable_faction = faction_from_cap_count(count)
+            if unstable_raw then unstable_faction = unstable_faction .. '(?)' end
+        end
         describe(points, mission.points_original, valid, count, 0, 0, nil,
-            guardforce, mission.guardforce_original, faction_name(count))
+            guardforce, mission.guardforce_original, unstable_faction)
         return true, 'waiting_for_stable_mission', false
     end
 
@@ -1113,7 +1151,20 @@ function patch.apply(api, game)
 
     local ok, reason = scale_points(api, director, points, patch.budget_multiplier)
     if not ok then return false, reason, false end
-    local faction = faction_name(count)
+    -- Prefer the faction recorded in the active config row; only fall back to the
+    -- cap-table cardinality when that field is missing or unrecognised. The row is
+    -- resolved here because scale_config (which also resolves it) runs later.
+    if not mission.cfg_address then
+        local address = resolve_config(api, game, director)
+        mission.cfg_address = address
+    end
+    local faction, faction_raw = faction_from_config(api, mission.cfg_address)
+    if not faction then
+        faction = faction_from_cap_count(count)
+        if faction_raw then
+            faction = faction .. '(?)'
+        end
+    end
     local guard_ok, scaled_guardforce = scale_guardforce(api, director, guardforce, faction)
     if not guard_ok then return false, scaled_guardforce, false end
     local weighted, candidate_count, bias_reason = scale_candidate_weights(api, director)

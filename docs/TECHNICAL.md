@@ -27,8 +27,9 @@ build the packages accept.
 | progression / influence index | `0x94DE00` / `0x94DE80` | `0x958F20` / `0x958FA0` |
 | travelers getter / curve evaluator | `0x943E40` / `0xD49E70` | `0x94E900` / `0xFE5280` |
 
-`runtime_verified` stays false until this retarget is played. Cap-table counts
-61/44/45 were not remeasured; a mismatch only marks the faction unknown.
+`runtime_verified` stays false until this retarget is played. The active faction is
+now read directly from the config row (see section 3); cap-table counts 61/44/45
+remain only as a fallback and a mismatch merely marks the faction unknown.
 
 ## 1. Runtime boundary
 
@@ -84,7 +85,7 @@ getters and is still at the old offset, so the extra 4 bytes are after
 
 | Offset | Field |
 |---|---|
-| `+0x00` | `faction` |
+| `+0x00` | `faction` (`FactionType`, a bitmask) |
 | `+0x04` | `max_encounter_members_to_remove` |
 | `+0x08` | `selected_encounter_member_weight_multiplier` |
 | `+0x0C` | `traveler_settings.minimum_spawn_point_cooldown` |
@@ -98,6 +99,28 @@ getters and is still at the old offset, so the extra 4 bytes are after
 
 `0x88 + 940 = 0x434`. The previous build had 4 trailing bytes (`0x438`); this
 build has 8 (`0x43C`). Offsets below that point are unchanged.
+
+`+0x00` is the authoritative mission faction, taken from the game's own typelib
+rather than inferred. `FactionType` is a bitmask
+(`_filediver_src/datalibrary/enum/factiontype.go`):
+
+| Member | Value |
+|---|---|
+| `FactionType_None` | `0` |
+| `FactionType_SuperEarth` | `1` |
+| `FactionType_Bugs` (Terminid) | `2` |
+| `FactionType_Illuminate` | `4` |
+| `FactionType_Cyborg` (Automaton) | `8` |
+| `FactionType_Wildlife` | `16` |
+
+The module tests each known bit individually, so a combined value still resolves
+to a faction. An earlier revision inferred the faction from the active cap table's
+row count (61 Automaton / 44 Terminid / 45 Illuminate); that inference is wrong
+whenever a faction's table changes size, which is what produced mislabelled
+missions. The cap-count map is retained only as a fallback for rows whose faction
+field is `0`, unrecognised, or absent, and a fallback label is suffixed `(?)` so
+the log cannot be mistaken for an authoritative reading. GuardForce scaling
+matches on the bare name, so the suffix never changes behaviour.
 
 ## 4. Verified spawn levers
 
@@ -593,7 +616,7 @@ second and rotated at 4 MB.
 |---|---|
 | `p=` | Encounter budget, current/original |
 | `gf=` | GuardForce budget, current/original |
-| `f=` | faction from cap-table cardinality (automaton 61, terminid 44, illuminate 45) |
+| `f=` | mission faction from the config row's `FactionType`; a `(?)` suffix means it was inferred from the cap-table cardinality instead (automaton 61, terminid 44, illuminate 45) |
 | `c=` | valid cap rows / total |
 | `i=` | scaled Straggler/Patrol intervals |
 | `g=` | group clamp, `d=` desired target |
