@@ -1,0 +1,6 @@
+﻿1. Open your ESM-pr clone folder.
+2. Copy everything inside ESM-pr-source over the ESM-pr root (overwrite).
+3. Do NOT copy LuaJIT/build/releases/vendor/logs.
+4. Then: git add src scripts tests tools README.md
+
+tools has: 导出ESM诊断包.bat and export-esm-logs.bat (same script).

@@ -257,6 +257,15 @@ end
 local originals = {}
 local clones = {block = nil, size = 0}
 local resource_clone = {source = nil, block = nil, size = 0}
+-- Lightweight diagnostics surface read by the loader blackbox. Fields are
+-- overwritten in place so archive_loader can sample them without parsing detail.
+patch.diag = {
+    resource_clone_active = false,
+    resource_clone_size = 0,
+    resource_clone_events = 0,
+    last_clone_event = 'none',
+    write_failures = 0,
+}
 local override_state = {}
 local modifier_state = {}
 local mission = {
@@ -396,31 +405,53 @@ end
 local function ensure_resource_clone(api, game, manager, root)
     local size = 0x260 + patch.resource_slots * patch.cfg_stride
     if resource_clone.block and resource_clone.size >= size then
-        if same_pointer(api, resource_clone.block, root) then return resource_clone.block end
+        if same_pointer(api, resource_clone.block, root) then
+            patch.diag.resource_clone_active = true
+            patch.diag.resource_clone_size = resource_clone.size
+            return resource_clone.block
+        end
         if same_pointer(api, resource_clone.source, root) then
             if not api.writable_data(manager + patch.resource_table_offset, 8) then
+                patch.diag.last_clone_event = 'retarget_not_writable'
                 return nil, 'spawn_config_resource_table_not_writable_private_data'
             end
             if api.write(manager + patch.resource_table_offset, pack_ptr(resource_clone.block))
                 and same_pointer(api, api.pointer(api.read(manager + patch.resource_table_offset, 8)), resource_clone.block) then
+                patch.diag.resource_clone_active = true
+                patch.diag.resource_clone_size = resource_clone.size
+                patch.diag.resource_clone_events = patch.diag.resource_clone_events + 1
+                patch.diag.last_clone_event = 'retarget'
                 return resource_clone.block
             end
+            patch.diag.last_clone_event = 'retarget_failed'
             return nil, 'spawn_config_resource_retarget_failed'
         end
     end
     if not api.writable_data(manager + patch.resource_table_offset, 8) then
+        patch.diag.last_clone_event = 'clone_not_writable'
         return nil, 'spawn_config_resource_table_not_writable_private_data'
     end
     ffi = ffi or require('ffi')
     local block = api.alloc_private(size)
-    if not block then return nil, 'spawn_config_resource_clone_alloc_failed' end
+    if not block then
+        patch.diag.last_clone_event = 'alloc_failed'
+        return nil, 'spawn_config_resource_clone_alloc_failed'
+    end
     local ok = pcall(ffi.copy, block, root, size)
-    if not ok then return nil, 'spawn_config_resource_clone_read_failed' end
+    if not ok then
+        patch.diag.last_clone_event = 'copy_failed'
+        return nil, 'spawn_config_resource_clone_read_failed'
+    end
     if not api.write(manager + patch.resource_table_offset, pack_ptr(block))
         or not same_pointer(api, api.pointer(api.read(manager + patch.resource_table_offset, 8)), block) then
+        patch.diag.last_clone_event = 'retarget_failed'
         return nil, 'spawn_config_resource_retarget_failed'
     end
     resource_clone.source, resource_clone.block, resource_clone.size = root, block, size
+    patch.diag.resource_clone_active = true
+    patch.diag.resource_clone_size = size
+    patch.diag.resource_clone_events = patch.diag.resource_clone_events + 1
+    patch.diag.last_clone_event = 'cloned'
     return block
 end
 local function scale_points(api, director, points, budget)

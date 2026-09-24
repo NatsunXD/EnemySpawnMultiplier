@@ -43,7 +43,7 @@ assert(approx(panel.model.pending.budget, patch.budget_multiplier))
 pass('first launch opens on the live profile when no config file exists')
 
 -- Commit a distinctive profile. Apply must reach the patch and persist it.
-panel.model.pending.budget, panel.model.pending.patrol_count, panel.model.pending.patrol_size = 4.5, 3.0, 0.5
+panel.model.pending.budget, panel.model.pending.patrol_count = 4.5, 3.0
 panel.model.pending.encounter_cd, panel.model.pending.patrol_cd = 12.0, 2.0
 panel.model.pending.preset = 'light_medium'
 assert(panel.apply() == true, 'apply failed')
@@ -53,6 +53,7 @@ local contents = file:read('*a'); file:close()
 assert(contents:find('budget=4.5', 1, true))
 assert(contents:find('encounter_cd=12', 1, true))
 assert(contents:find('preset=light_medium', 1, true))
+assert(not contents:find('patrol_size', 1, true))
 pass('pressing Apply commits the profile to the patch and to disk')
 
 -- Simulate a restart: the patch comes back on its shipped defaults and a fresh
@@ -65,7 +66,7 @@ local restarted = make_panel()
 assert(saw_event('config_restored'), 'restore was not reported')
 assert(approx(patch.budget_multiplier, 4.5), 'budget was not restored')
 assert(approx(patch.modifier_patrol_count, 3.0), 'patrol count was not restored')
-assert(approx(patch.modifier_travelers_max_unit, 0.5), 'patrol size was not restored')
+assert(approx(patch.modifier_travelers_max_unit, 1.0), 'patrol size must stay fixed at 1.0')
 assert(approx(restarted.model.pending.budget, 4.5))
 assert(restarted.model.pending.preset == 'light_medium')
 pass('a later launch restores the saved profile before the first updater pass')

@@ -12,28 +12,29 @@ local function approx(a, b) return math.abs(a - b) <= 0.0001 end
 
 local model = create_model()
 
--- Defaults requested for the panel: 2x multipliers, both cooldowns short,
--- heavy template preset.
+-- Defaults requested for the panel: 2x budget/count, both cooldowns short,
+-- heavy template preset. Patrol size is not a panel control.
 assert(model.pending.budget == 2.0)
 assert(model.pending.patrol_count == 2.0)
-assert(model.pending.patrol_size == 2.0)
+assert(model.pending.patrol_size == nil)
 assert(approx(model.pending.encounter_cd, 2.0))
 assert(approx(model.pending.patrol_cd, 2.0))
 assert(model.pending.preset == 'heavy')
-pass('panel defaults to 2x multipliers, fast cooldowns and the heavy preset')
+pass('panel defaults to 2x budget/count, fast cooldowns and heavy')
 
--- Five sliders and three radios, in the documented order.
+-- Four sliders and three radios, in the documented order.
 local widgets = model.layout()
-assert(#widgets.sliders == 5 and #widgets.radios == 3 and #widgets.buttons == 2)
+assert(#widgets.sliders == 4 and #widgets.radios == 3 and #widgets.buttons == 3)
 assert(widgets.sliders[1].key == 'budget')
 assert(widgets.sliders[2].key == 'patrol_count')
-assert(widgets.sliders[3].key == 'patrol_size')
-assert(widgets.sliders[4].key == 'encounter_cd' and widgets.sliders[4].kind == 'cooldown')
-assert(widgets.sliders[5].key == 'patrol_cd' and widgets.sliders[5].kind == 'cooldown')
+assert(widgets.sliders[3].key == 'encounter_cd' and widgets.sliders[3].kind == 'cooldown')
+assert(widgets.sliders[4].key == 'patrol_cd' and widgets.sliders[4].kind == 'cooldown')
+assert(widgets.buttons[3].id == 'export')
+assert(type(widgets.buttons[3].label) == 'string' and #widgets.buttons[3].label > 0)
 assert(widgets.radios[1].value == 'heavy')
 assert(widgets.radios[2].value == 'light_medium')
 assert(widgets.radios[3].value == 'native')
-pass('panel exposes five sliders and three template radios')
+pass('panel exposes four sliders, three radios and an export button')
 
 -- Every label the panel paints must be present and non-empty.
 for _, control in ipairs(widgets.sliders) do
@@ -66,7 +67,7 @@ pass('slider drags clamp to the configured range')
 
 -- Cooldown sliders are a continuous 2 s .. 30 s interval. The left end is the
 -- fast preset; the right end is the slow/native end.
-local cd = widgets.sliders[4]
+local cd = widgets.sliders[3]
 model.set_slider(cd, cd.track_x - 1000)
 assert(approx(model.pending.encounter_cd, 2.0))
 model.set_slider(cd, cd.track_x + cd.track_w + 1000)
@@ -102,7 +103,7 @@ local patch = {cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0}
 local wanted = model.settings(patch)
 assert(approx(wanted.budget, 2.0))
 assert(approx(wanted.patrol_count, 2.0))
-assert(approx(wanted.patrol_size, 2.0))
+assert(approx(wanted.patrol_size, 1.0))
 assert(approx(wanted.encounter_cd_seconds, 2.0))
 assert(approx(wanted.patrol_cd_seconds, 2.0))
 assert(wanted.preset == 'heavy')
@@ -148,7 +149,7 @@ model.sync_from_patch({budget_multiplier = 6.0, modifier_patrol_count = 0.1,
                        template_bias_heavy = 4.0})
 assert(approx(model.pending.budget, 6.0))
 assert(approx(model.pending.patrol_count, 0.1))
-assert(approx(model.pending.patrol_size, 2.0))
+assert(model.pending.patrol_size == nil)
 assert(approx(model.pending.encounter_cd, 2.0))
 assert(approx(model.pending.patrol_cd, 2.0))
 assert(model.pending.preset == 'heavy')

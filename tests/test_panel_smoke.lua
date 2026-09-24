@@ -57,7 +57,7 @@ local live = {budget_multiplier = 3.0, modifier_patrol_count = 4.5,
 synced.sync_from_patch(live)
 assert(math.abs(synced.pending.budget - 3.0) < 0.001)
 assert(math.abs(synced.pending.patrol_count - 4.5) < 0.001)
-assert(math.abs(synced.pending.patrol_size - 1.5) < 0.001)
+assert(synced.pending.patrol_size == nil)
 assert(math.abs(synced.pending.encounter_cd - 30.0) < 0.001)
 assert(math.abs(synced.pending.patrol_cd - 30.0) < 0.001)
 assert(synced.pending.preset == 'native')
@@ -65,14 +65,14 @@ pass('panel syncs its controls from the live profile')
 
 -- Drive the panel's apply path through the model and the real configure().
 local model = create_model()
-model.pending.budget, model.pending.patrol_count, model.pending.patrol_size = 1.5, 3.0, 0.5
+model.pending.budget, model.pending.patrol_count = 1.5, 3.0
 model.pending.encounter_cd, model.pending.patrol_cd = 30.0, 2.0
 model.pending.preset = 'light_medium'
 local applied, apply_reason = model.apply(patch)
 assert(applied, 'panel apply rejected: ' .. tostring(apply_reason))
 assert(math.abs(patch.budget_multiplier - 1.5) < 0.0001)
 assert(math.abs(patch.modifier_patrol_count - 3.0) < 0.0001)
-assert(math.abs(patch.modifier_travelers_max_unit - 0.5) < 0.0001)
+assert(math.abs(patch.modifier_travelers_max_unit - 1.0) < 0.0001)
 -- 30 s is the slow end: native curve, no deadline clamp.
 assert(math.abs(patch.modifier_encounter_cooldown - 1.0) < 0.0001)
 assert(patch.encounter_deadline_enabled == false)

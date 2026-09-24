@@ -12,16 +12,22 @@ os.remove(directory .. '/EnemySpawnMultiplier.cfg')
 local store = create_store({dir = directory})
 
 -- A full profile survives an encode/decode round trip unchanged.
-local profile = {budget = 4.5, patrol_count = 3.0, patrol_size = 0.5,
+local profile = {budget = 4.5, patrol_count = 3.0,
                  encounter_cd = 12.0, patrol_cd = 2.0, preset = 'light_medium'}
 local text = store.encode(profile)
 assert(type(text) == 'string' and text:sub(1, 8) == 'version=')
+assert(not text:find('patrol_size', 1, true), 'patrol_size must not be persisted')
 local decoded, reason = store.decode(text)
 assert(decoded, tostring(reason))
-assert(decoded.budget == 4.5 and decoded.patrol_count == 3.0 and decoded.patrol_size == 0.5)
+assert(decoded.budget == 4.5 and decoded.patrol_count == 3.0 and decoded.patrol_size == nil)
 assert(decoded.encounter_cd == 12.0 and decoded.patrol_cd == 2.0)
 assert(decoded.preset == 'light_medium')
 pass('a profile survives an encode/decode round trip')
+
+-- Legacy cfg files that still contain patrol_size must load without resurrecting it.
+local legacy = store.decode('version=1\nbudget=2.0\npatrol_count=2.0\npatrol_size=3.0\npreset=heavy\n')
+assert(legacy and legacy.budget == 2.0 and legacy.patrol_size == nil)
+pass('legacy patrol_size in cfg is ignored')
 
 -- The panel path is only one line of text, so the save must go through the real
 -- file system and read back byte-for-byte.

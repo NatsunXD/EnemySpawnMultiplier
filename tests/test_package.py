@@ -42,19 +42,23 @@ def main():
             'data-v20-fast-cadence': 'v20',
             'data-v20-preview-patrol-2x-3x': 'v20-preview',
             'data-v20-panel': 'v20',
+            'data-v20-panel-blackbox': 'v20-blackbox',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] in ('data-v20-fast-cadence', 'data-v20-preview-patrol-2x-3x', 'data-v20-panel'):
+        if provenance['revision'] in ('data-v20-fast-cadence', 'data-v20-preview-patrol-2x-3x',
+                                      'data-v20-panel', 'data-v20-panel-blackbox'):
             expected_patrol_count, expected_travelers_max_unit = (6.0, 6.0)
             if provenance['revision'] == 'data-v20-preview-patrol-2x-3x':
                 expected_patrol_count, expected_travelers_max_unit = 2.0, 3.0
-            elif provenance['revision'] == 'data-v20-panel':
-                expected_patrol_count, expected_travelers_max_unit = 2.0, 2.0
-            expected_budget = 2.0 if provenance['revision'] == 'data-v20-panel' else 0.4
+            elif provenance['revision'] in ('data-v20-panel', 'data-v20-panel-blackbox'):
+                expected_patrol_count = 2.0
+                expected_travelers_max_unit = 1.0 if provenance['revision'] == 'data-v20-panel-blackbox' else 2.0
+            expected_budget = 2.0 if provenance['revision'] in (
+                'data-v20-panel', 'data-v20-panel-blackbox') else 0.4
             assert change['budget_multiplier'] == expected_budget
             assert change['budget_override_multiplier'] == expected_budget
             assert change['derive_override_from_base'] is False
@@ -69,7 +73,8 @@ def main():
             # The patrol refresh curve has its own fastest end. The panel build
             # ships that end at 6x; the Fast Cadence and preview builds keep the
             # long-standing 3x value they were tuned and live-tested with.
-            expected_patrol_cd = 6.0 if provenance['revision'] == 'data-v20-panel' else 3.0
+            expected_patrol_cd = 6.0 if provenance['revision'] in (
+                'data-v20-panel', 'data-v20-panel-blackbox') else 3.0
             assert change['modifier_scales'] == {'encounter_cooldown': 3.0,
                                                  'patrol_count': expected_patrol_count,
                                                  'patrol_cooldown': expected_patrol_cd,

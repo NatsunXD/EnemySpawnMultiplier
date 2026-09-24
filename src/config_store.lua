@@ -19,7 +19,9 @@ return function(options)
     M.FILENAME = options.filename or 'EnemySpawnMultiplier.cfg'
 
     -- Written in this order so the file is stable and diffable.
-    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset'}
+    -- patrol_size is no longer a panel control; ignore it if an older cfg still
+    -- contains the field so restore cannot resurrect a removed slider.
+    M.FIELDS = {'budget', 'patrol_count', 'encounter_cd', 'patrol_cd', 'preset'}
 
     -- Same ranges the panel and patch.configure() enforce. Values read back out
     -- of range are clamped here so a corrupt file degrades to a valid profile
@@ -29,7 +31,6 @@ return function(options)
     local LIMITS = {
         budget = MULTIPLIER,
         patrol_count = MULTIPLIER,
-        patrol_size = MULTIPLIER,
         encounter_cd = COOLDOWN,
         patrol_cd = COOLDOWN,
     }

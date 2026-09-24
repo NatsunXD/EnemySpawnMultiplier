@@ -69,11 +69,11 @@ VARIANTS = {
         },
     },
     'panel': {
-        'revision': 'data-v20-panel',
-        'public_version': 'v20',
-        'name': 'Enemy Spawn Multiplier Panel',
+        'revision': 'data-v20-panel-blackbox',
+        'public_version': 'v20-blackbox',
+        'name': 'Enemy Spawn Multiplier Panel Blackbox',
         'panel': True,
-        'description': 'Enemy Spawn Multiplier with the in-game configuration panel. Press F8 to open a compact overlay that exposes the reinforcement budget, patrol count, patrol size, reinforcement cooldown and patrol cooldown as live sliders, plus three template presets (heavy focus, light/medium focus, native). Changes apply to the running mission on the next updater pass. It starts from a conservative 2x budget, 2x patrol count, 2x patrol size, both cooldowns at the fast end (2 s) and the heavy-focus preset; the cooldown rows can be slid back toward the native pacing. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Panel build with a light always-on blackbox for crash triage. Press F8 for the configuration overlay; use Export game log to dump the live log/cfg onto the Desktop. Starts from 2x budget, 2x patrol count, fixed 1x patrol size, both cooldowns at the fast end (2 s) and the heavy-focus preset. Logs updater cost and resource-clone events. Changes writable private data only. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
         'overrides': {
             'budget_multiplier': 2.0,
@@ -89,7 +89,7 @@ VARIANTS = {
             'modifier_encounter_cooldown': 3.0,
             'modifier_patrol_count': 2.0,
             'modifier_patrol_cooldown': 6.0,
-            'modifier_travelers_max_unit': 2.0,
+            'modifier_travelers_max_unit': 1.0,
             'template_bias_light': 0.25,
             'template_bias_medium': 1.0,
             'template_bias_heavy': 4.0,
@@ -220,6 +220,7 @@ def main():
                              settings['modifier_patrol_count'], settings['modifier_travelers_max_unit']], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_model.lua', SOURCE, build], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_config_store.lua', SOURCE, build], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_diag_export.lua', SOURCE], env=env)
     if variant.get('panel', False) and os.name == 'nt':
         tests += '\n' + run([LUA, TESTS / 'test_panel_config.lua', SOURCE, build], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_bindings.lua', SOURCE], env=env)

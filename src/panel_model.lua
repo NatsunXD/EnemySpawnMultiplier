@@ -8,7 +8,7 @@ return function()
 
     -- Width fits the full 'EnemySpawnMultiplier v20 by Natsun' title plus the
     -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 560, 440
+    M.CLIENT_W, M.CLIENT_H = 560, 400
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
 
@@ -17,15 +17,16 @@ return function()
     M.COOLDOWN_FAST, M.COOLDOWN_SLOW = 2.0, 30.0
     M.COOLDOWN_STEPS = 28 -- 1 s grid across 2 .. 30
 
+    -- Patrol size is intentionally not exposed: the shipped profile keeps
+    -- travelers_max_unit at 1.0 and the panel must not offer a knob for it.
     local DEFAULTS = {
-        budget = 2.0, patrol_count = 2.0, patrol_size = 2.0,
+        budget = 2.0, patrol_count = 2.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
     }
 
     local SLIDER_LABELS = {
         {key = 'budget', label = '增援预算'},
         {key = 'patrol_count', label = '巡逻数量'},
-        {key = 'patrol_size', label = '巡逻规模'},
         {key = 'encounter_cd', label = '增援 CD', kind = 'cooldown'},
         {key = 'patrol_cd', label = '巡逻 CD', kind = 'cooldown'},
     }
@@ -56,11 +57,12 @@ return function()
         local radios = {}
         for index, def in ipairs(RADIO_LABELS) do
             radios[index] = {key = 'preset', value = def.value, label = def.label,
-                             x = 28, y = 280 + (index - 1) * 28, w = M.CLIENT_W - 56, h = 24}
+                             x = 28, y = 240 + (index - 1) * 28, w = M.CLIENT_W - 56, h = 24}
         end
         local buttons = {
-            {id = 'apply', label = '应用', x = 150, y = 372, w = 92, h = 32, accent = true},
-            {id = 'reset', label = '重置', x = 250, y = 372, w = 92, h = 32},
+            {id = 'apply', label = '应用', x = 72, y = 332, w = 92, h = 32, accent = true},
+            {id = 'reset', label = '重置', x = 180, y = 332, w = 92, h = 32},
+            {id = 'export', label = '导出游戏日志', x = 288, y = 332, w = 148, h = 32},
         }
         return {sliders = sliders, radios = radios, buttons = buttons}
     end
@@ -118,7 +120,8 @@ return function()
         return {
             budget = M.pending.budget,
             patrol_count = M.pending.patrol_count,
-            patrol_size = M.pending.patrol_size,
+            -- Fixed 1.0: patrol size is not a panel control.
+            patrol_size = 1.0,
             encounter_cd_seconds = M.pending.encounter_cd,
             patrol_cd_seconds = M.pending.patrol_cd,
             preset = M.pending.preset,
@@ -134,9 +137,6 @@ return function()
             / (M.SLIDER_MAX - M.SLIDER_MIN) * M.SLIDER_STEPS + 0.5))
         M.pending.patrol_count = M.slider_to_value(math.floor(
             (math.min(math.max(patch.modifier_patrol_count, M.SLIDER_MIN), M.SLIDER_MAX) - M.SLIDER_MIN)
-            / (M.SLIDER_MAX - M.SLIDER_MIN) * M.SLIDER_STEPS + 0.5))
-        M.pending.patrol_size = M.slider_to_value(math.floor(
-            (math.min(math.max(patch.modifier_travelers_max_unit, M.SLIDER_MIN), M.SLIDER_MAX) - M.SLIDER_MIN)
             / (M.SLIDER_MAX - M.SLIDER_MIN) * M.SLIDER_STEPS + 0.5))
         -- A disabled deadline clamp means the slow/native end, regardless of any
         -- stale interval value left behind by a previous configuration.
@@ -189,7 +189,7 @@ return function()
         end
         local changed = false
         local snaps = {
-            budget = snap_multiplier, patrol_count = snap_multiplier, patrol_size = snap_multiplier,
+            budget = snap_multiplier, patrol_count = snap_multiplier,
             encounter_cd = snap_cooldown, patrol_cd = snap_cooldown,
         }
         for key, snap in pairs(snaps) do
