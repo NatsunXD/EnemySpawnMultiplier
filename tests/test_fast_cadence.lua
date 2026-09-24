@@ -1,6 +1,11 @@
 -- Fast Cadence profile checks: reduced Encounter budget, near-zero timed paths, native GuardForce,
 -- scaled cooldown/patrol curves and heavy-focus candidate weighting.
 local source, build, executable_hash = assert(arg[1]), assert(arg[2]), assert(arg[3])
+-- The same profile checks serve Fast Cadence (6x/6x) and the local 2x/3x patrol
+-- preview. Expected patrol scales are passed by the builder so neither variant
+-- silently drifts from the other.
+local expected_patrol_count = tonumber(arg[4]) or 6.0
+local expected_travelers_max_unit = tonumber(arg[5]) or 6.0
 local ffi = require('ffi')
 local create_api = assert(loadfile(source .. '/windows_api.lua'))()
 local patch = assert(loadfile(source .. '/spawn_patch.lua'))()
@@ -18,9 +23,9 @@ patch.traveler_cooldown_min = 0.0
 patch.traveler_cooldown_max = 0.0
 patch.modifier_scale_enabled = true
 patch.modifier_encounter_cooldown = 3.0
-patch.modifier_patrol_count = 6.0
+patch.modifier_patrol_count = expected_patrol_count
 patch.modifier_patrol_cooldown = 3.0
-patch.modifier_travelers_max_unit = 6.0
+patch.modifier_travelers_max_unit = expected_travelers_max_unit
 patch.template_bias_enabled = true
 patch.template_bias_light = 0.25
 patch.template_bias_medium = 1.0
@@ -255,14 +260,14 @@ assert(patch.detail:find('g=100', 1, true))
 assert(patch.detail:find('d=30', 1, true))
 assert(patch.detail:find('t=3', 1, true))
 assert(patch.detail:find('tv=30.0-60.0', 1, true))
-assert(patch.detail:find('ms=3.0/6.0/3.0/6.0', 1, true))
-assert(patch.detail:find('mv=3.00/6.00/3.00/6.00', 1, true))
+assert(patch.detail:find(string.format('ms=3.0/%.1f/3.0/%.1f', expected_patrol_count, expected_travelers_max_unit), 1, true))
+assert(patch.detail:find(string.format('mv=3.00/%.2f/3.00/%.2f', expected_patrol_count, expected_travelers_max_unit), 1, true))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), expected_patrol_count))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164 + 14 * 4), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 6.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), expected_travelers_max_unit))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), expected_travelers_max_unit))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x0c), 30))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x10), 60))
 pass('fast cadence lowers Encounter to 0.4x and clamps the reinforcement cooldown to two seconds')
@@ -328,19 +333,22 @@ ok, reason, active = patch.apply(api, game)
 assert(ok and active and writes == modifier_writes)
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
 assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc + 14 * 4), 3.0))
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8 + 14 * 4), expected_travelers_max_unit))
 pass('already-scaled difficulty modifier blocks are not scaled twice')
 
 -- A block the game re-blends for a new difficulty must adopt the new native
--- value as its baseline instead of stacking the previous scale on top.
-put_f32(director + patch.cfg_base_offset + 0x1a0, 2.0)
+-- value as its baseline instead of stacking the previous scale on top. The probe
+-- deliberately avoids the native 1.0: with a 2.0x profile a 2.0 probe would already
+-- equal the scaled target and the write could not be observed.
+local reblend_native = 2.5
+put_f32(director + patch.cfg_base_offset + 0x1a0, reblend_native)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 12.0))
-put_f32(director + patch.cfg_base_offset + 0x1a0, 2.0)
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), reblend_native * expected_patrol_count))
+put_f32(director + patch.cfg_base_offset + 0x1a0, reblend_native)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active)
-assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 12.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), reblend_native * expected_patrol_count))
 pass('a re-blended modifier block is re-scaled once from its new native value')
 
 -- A config already in the Fast Cadence state must not multiply its group or intervals again.
@@ -396,5 +404,122 @@ assert(ok and active and writes == bias_writes)
 assert(approx(candidate_weight(4), 4.0))
 assert(approx(candidate_weight(0), 0.25))
 pass('heavy tier candidates gain weight and the bias does not stack')
+
+-- Live reconfiguration: the in-game panel assigns into the same fields while a
+-- mission is running, and the next updater pass must apply the new profile
+-- without stacking on the values this profile already wrote.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+local scaled_points = get_f32(director + patch.points_offset)
+assert(scaled_points ~= 100)
+assert(patch.configure{budget = 2.0, patrol_count = 2.0, patrol_size = 3.0,
+                       encounter_cd_seconds = 30.0, patrol_cd_seconds = 30.0,
+                       preset = 'heavy'})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+-- 100 native points x the new 2x budget, not the previous scaled value x 2.
+assert(approx(get_f32(director + patch.points_offset), 200))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1a0), 2.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x3f8), 3.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 1.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc), 1.0))
+local live_writes = writes
+ok, reason, active = patch.apply(api, game)
+assert(ok and active and writes == live_writes)
+pass('live budget, patrol and cooldown reconfiguration applies without stacking')
+
+-- A mid-range cooldown position must interpolate the rate curve rather than
+-- snapping to one of the two ends, and the reinforcement deadline must follow.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+assert(patch.configure{encounter_cd_seconds = 16.0, patrol_cd_seconds = 9.0})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+local enc_rate = get_f32(director + patch.cfg_base_offset + 0x164)
+local patrol_rate = get_f32(director + patch.cfg_base_offset + 0x1dc)
+-- The two paths have different fastest-end scales, so each is bounded by its
+-- own rate.
+assert(enc_rate > 1.0 and enc_rate < patch.cooldown_fast_rate)
+assert(patrol_rate > 1.0 and patrol_rate < patch.patrol_cooldown_fast_rate)
+assert(enc_rate ~= patrol_rate)
+assert(approx(patch.encounter_max_interval, 16.0))
+assert(patch.encounter_deadline_enabled == true)
+pass('mid-range cooldown positions interpolate the rate curve')
+
+-- The patrol fastest end is the requested 6x, while reinforcement stays at 3x;
+-- both slow ends return to native 1.0.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+assert(patch.configure{encounter_cd_seconds = 2.0, patrol_cd_seconds = 2.0})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc), 6.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 3.0))
+assert(patch.configure{encounter_cd_seconds = 30.0, patrol_cd_seconds = 30.0})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x1dc), 1.0))
+assert(approx(get_f32(director + patch.cfg_base_offset + 0x164), 1.0))
+pass('patrol fast end is 6x, reinforcement stays 3x, both slow ends are native')
+
+-- Direction: sliding right (longer target seconds) must lengthen the effective
+-- cooldown, i.e. lower the rate. The previous UI had this inverted.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+assert(patch.configure{encounter_cd_seconds = 2.0})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+local fast_rate = get_f32(director + patch.cfg_base_offset + 0x164)
+assert(patch.configure{encounter_cd_seconds = 30.0})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+local slow_rate = get_f32(director + patch.cfg_base_offset + 0x164)
+assert(fast_rate > slow_rate, 'fast end must yield a higher rate than the slow end')
+assert(approx(slow_rate, 1.0))
+assert(approx(fast_rate, patch.cooldown_fast_rate))
+pass('sliding toward slow lengthens the cooldown (direction is not inverted)')
+
+
+
+-- Switching the preset back to native must undo the candidate weights already
+-- written, not just stop touching them.
+director_present = false
+assert(patch.apply(api, game))
+mission(faction_caps(45, 2000), 100, 600)
+fill_config(20, 40, 8, 14, 10, 30, -1)
+put_u32(director + patch.candidate_count_offset, 5)
+fill_candidate(0, 1.0, 10.0, 10)
+fill_candidate(1, 1.0, 20.0, 10)
+fill_candidate(2, 1.0, 30.0, 10)
+fill_candidate(3, 1.0, 80.0, 10)
+fill_candidate(4, 1.0, 200.0, 10)
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+assert(approx(candidate_weight(4), 4.0))
+assert(patch.configure{preset = 'native'})
+ok, reason, active = patch.apply(api, game)
+assert(ok and active)
+for index = 0, 4 do assert(approx(candidate_weight(index), 1.0)) end
+pass('live preset switch back to native restores every candidate weight')
+
+-- Out-of-range settings must be rejected without disturbing the live values.
+local before_budget = patch.budget_multiplier
+local ok_range, range_reason = patch.configure{budget = 99.0}
+assert(ok_range == false and range_reason == 'budget_out_of_range')
+assert(patch.budget_multiplier == before_budget)
+local ok_preset, preset_reason = patch.configure{preset = 'nonsense'}
+assert(ok_preset == false and preset_reason == 'preset_unknown')
+assert(patch.configure{budget = 99.0} == false)
+pass('rejected live settings leave the active configuration untouched')
 
 print(count .. ' fast cadence profile checks passed; no executable code was modified.')

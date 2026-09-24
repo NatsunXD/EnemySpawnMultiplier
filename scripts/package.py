@@ -35,13 +35,13 @@ def package_release(root: Path, build: Path, report: dict) -> Path:
         files['thumbnail.png'] = thumbnail.read_bytes()
     provenance = {
         'name': report['name'], 'revision': report['revision'], 'display_version': release_version,
-        'steam_build': 25327279, 'exe_version': '1.8.45850.0',
+        'steam_build': 25480438, 'exe_version': '1.8.46015.0',
         'game_exe_sha256': report['game_exe_sha256'],
         'game_dll_sha256': report['game_dll_sha256'],
         'runtime_verified': False,
         'files': {name: digest(data) for name, data in files.items()},
     }
-    for key in ('requires', 'provides', 'loader_integration', 'data_change'):
+    for key in ('requires', 'optional_requires', 'provides', 'loader_integration', 'data_change'):
         if key in report:
             provenance[key] = report[key]
     files[slug + '-manifest.json'] = (json.dumps(provenance, indent=2) + '\n').encode()

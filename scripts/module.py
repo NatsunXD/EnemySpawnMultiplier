@@ -15,11 +15,25 @@ def lua_literal(value):
     raise TypeError(f'Unsupported Lua override type: {type(value).__name__}')
 
 
-def build_module(root, build, module_name, patch_name, revision, template_bias=False, overrides=None):
+def build_module(root, build, module_name, patch_name, revision, template_bias=False, overrides=None,
+                 with_panel=False):
     build.mkdir(parents=True, exist_ok=True)
     module = ''
-    for variable, filename in [('create_api', 'windows_api.lua'), ('patch', patch_name),
-                               ('install_loader', 'archive_loader.lua')]:
+    # The configuration panel is opt-in. Variants that never scale the patrol
+    # curves would otherwise open a panel showing invented 0.1x values, and
+    # pressing Apply would switch curve scaling on for a profile that
+    # deliberately leaves those fields native.
+    # anchor_check is part of the base module: it replaces the build-hash gate for
+    # every variant, panel or not.
+    source_pairs = [('create_api', 'windows_api.lua'), ('patch', patch_name)]
+    if with_panel:
+        source_pairs += [('create_panel', 'panel.lua'), ('create_model', 'panel_model.lua'),
+                         ('create_bindings', 'bindings.lua')]
+    source_pairs += [('create_anchors', 'anchor_check.lua'),
+                     ('install_loader', 'archive_loader.lua')]
+    if not with_panel:
+        module += 'local create_panel, create_model, create_bindings = nil, nil, nil\n'
+    for variable, filename in source_pairs:
         code = (root / 'src' / filename).read_text(encoding='utf-8')
         for forbidden in ('VirtualProtect', 'FlushInstructionCache', 'CreateRemoteThread', 'LoadLibrary'):
             if forbidden in code:
@@ -31,7 +45,7 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
             for key in sorted((overrides or {}).keys()):
                 module += f'patch.{key} = {lua_literal(overrides[key])}\n'
     module += f"install_loader(create_api, patch, {{revision = '{revision}', "
-    module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '})\n'
+    module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '}, create_panel, create_model, create_bindings, create_anchors)\n'
     path, output = build / 'mod.wrapper.lua', build / 'mod.ljbc'
     path.write_text(module, encoding='utf-8', newline='\n')
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')

@@ -547,8 +547,11 @@ for _, kind in ipairs({'unreadable', 'write_failure', 'identity_changed'}) do
 end
 pass('page, read, write and reset-race failures do not broaden the layout')
 
+-- Loader policy: a build-hash mismatch is reported but must NOT block the patch.
+-- 'exe'/'game' below feed a wrong hash and still expect the probe to run; only a
+-- genuinely unusable host (ffi unavailable, missing module) may stop it.
 local identity = {revision = 'fixture', exe_sha256 = 'exe', game_sha256 = 'game'}
-for _, mode in ipairs({'success', 'spawn_failure', 'exe', 'game', 'ffi'}) do
+for _, mode in ipairs({'success', 'spawn_failure', 'exe', 'game', 'ffi', 'nomodule'}) do
     local updates, checks, factories = 0, 0, 0
     local env = setmetatable({print = function() end, os = {getenv = function() end}}, {__index = _G})
     env._G = env
@@ -562,24 +565,28 @@ for _, mode in ipairs({'success', 'spawn_failure', 'exe', 'game', 'ffi'}) do
         factories = factories + 1
         if mode == 'ffi' then error('ffi unavailable') end
         return {
-            module = function(name) return name and 'game' or 'exe' end,
+            module = function(name)
+                if mode == 'nomodule' then return nil end
+                return name and 'game' or 'exe'
+            end,
             module_hash = function(module) return module == mode and 'mismatch' or module end,
         }
     end
     local probe = {apply = function()
         checks = checks + 1
-        return mode ~= 'spawn_failure', checks == 1 and 'waiting_for_mission' or 'spawn_multiplier_ready', checks > 1
+        return true, checks == 1 and 'waiting_for_mission' or 'spawn_multiplier_ready', checks > 1
     end}
     local chunk = assert(loadfile(source .. '/archive_loader.lua')); setfenv(chunk, env)
     local loader = chunk(); setfenv(loader, env)
     loader(factory, probe, identity)
     loader(factory, probe, identity)
     for _ = 1, 5 do env.update(0.1, 123) end
+    local host_ok = not (mode == 'ffi' or mode == 'nomodule')
     assert(updates == 5 and factories == 1 and env.shutdown == shutdown)
-    assert(checks == ((mode == 'ffi' or mode == 'exe' or mode == 'game') and 0 or mode == 'spawn_failure' and 1 or 5))
-    assert(env.EnemySpawnMultiplier.active == (mode == 'success'))
+    assert(checks == (host_ok and 5 or 0), 'checks=' .. checks .. ' mode=' .. mode)
+    assert(env.EnemySpawnMultiplier.active == host_ok, 'active mode=' .. mode)
 end
-pass('loader handles failures, duplicate initialization and existing update callbacks')
+pass('loader reports hash changes but only stops when the host is unusable')
 
 local env = setmetatable({print = function() end, os = {getenv = function() end}}, {__index = _G})
 env._G = env

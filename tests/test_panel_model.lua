@@ -1,0 +1,183 @@
+-- Panel model checks: slider grid, hit testing and settings mapping.
+-- Pure logic only; no FFI, no window and no game memory is touched here.
+-- This file is deliberately ASCII-only: the two CJK label expectations are
+-- assembled from UTF-8 byte values so the test is independent of the encoding
+-- of whatever tool wrote it.
+local source, build = assert(arg[1]), assert(arg[2])
+local create_model = assert(loadfile(source .. '/panel_model.lua'))()
+
+local count = 0
+local function pass(name) count = count + 1; print('PASS: ' .. name) end
+local function approx(a, b) return math.abs(a - b) <= 0.0001 end
+
+local model = create_model()
+
+-- Defaults requested for the panel: 2x multipliers, both cooldowns short,
+-- heavy template preset.
+assert(model.pending.budget == 2.0)
+assert(model.pending.patrol_count == 2.0)
+assert(model.pending.patrol_size == 2.0)
+assert(approx(model.pending.encounter_cd, 2.0))
+assert(approx(model.pending.patrol_cd, 2.0))
+assert(model.pending.preset == 'heavy')
+pass('panel defaults to 2x multipliers, fast cooldowns and the heavy preset')
+
+-- Five sliders and three radios, in the documented order.
+local widgets = model.layout()
+assert(#widgets.sliders == 5 and #widgets.radios == 3 and #widgets.buttons == 2)
+assert(widgets.sliders[1].key == 'budget')
+assert(widgets.sliders[2].key == 'patrol_count')
+assert(widgets.sliders[3].key == 'patrol_size')
+assert(widgets.sliders[4].key == 'encounter_cd' and widgets.sliders[4].kind == 'cooldown')
+assert(widgets.sliders[5].key == 'patrol_cd' and widgets.sliders[5].kind == 'cooldown')
+assert(widgets.radios[1].value == 'heavy')
+assert(widgets.radios[2].value == 'light_medium')
+assert(widgets.radios[3].value == 'native')
+pass('panel exposes five sliders and three template radios')
+
+-- Every label the panel paints must be present and non-empty.
+for _, control in ipairs(widgets.sliders) do
+    assert(type(control.label) == 'string' and #control.label > 0)
+end
+for _, control in ipairs(widgets.radios) do
+    assert(type(control.label) == 'string' and #control.label > 0)
+end
+pass('every painted control carries a non-empty label')
+
+-- The multiplier grid must span exactly 0.1 .. 6.0 and land on 2.0.
+assert(approx(model.slider_to_value(0), 0.1))
+assert(approx(model.slider_to_value(model.SLIDER_STEPS), 6.0))
+local found_two = false
+for step = 0, model.SLIDER_STEPS do
+    local value = model.slider_to_value(step)
+    assert(value >= 0.1 - 0.0001 and value <= 6.0 + 0.0001)
+    if approx(value, 2.0) then found_two = true end
+end
+assert(found_two)
+pass('multiplier sliders cover 0.1x to 6.0x inclusive on a 0.1 grid')
+
+-- Dragging a slider to an extreme must clamp, not overflow the range.
+local item = widgets.sliders[1]
+model.set_slider(item, item.track_x - 1000)
+assert(approx(model.pending.budget, 0.1))
+model.set_slider(item, item.track_x + item.track_w + 1000)
+assert(approx(model.pending.budget, 6.0))
+pass('slider drags clamp to the configured range')
+
+-- Cooldown sliders are a continuous 2 s .. 30 s interval. The left end is the
+-- fast preset; the right end is the slow/native end.
+local cd = widgets.sliders[4]
+model.set_slider(cd, cd.track_x - 1000)
+assert(approx(model.pending.encounter_cd, 2.0))
+model.set_slider(cd, cd.track_x + cd.track_w + 1000)
+assert(approx(model.pending.encounter_cd, 30.0))
+model.set_slider(cd, cd.track_x + cd.track_w * 0.5)
+local mid = model.pending.encounter_cd
+assert(mid > 2.0 and mid < 30.0)
+-- The row must not print a number: only the words at the two ends.
+assert(model.format(cd) == '')
+pass('cooldown sliders sweep 2s..30s and print no numeric value')
+
+-- Hit testing must agree with the painted geometry for every control.
+for _, control in ipairs(widgets.sliders) do
+    local kind, hit = model.hit(control.track_x + control.track_w / 2, control.track_y)
+    assert(kind == 'slider' and hit.key == control.key)
+end
+for _, control in ipairs(widgets.radios) do
+    local kind, hit = model.hit(control.x + 4, control.y + 4)
+    assert(kind == 'radio' and hit.value == control.value)
+end
+for _, control in ipairs(widgets.buttons) do
+    local kind, hit = model.hit(control.x + 4, control.y + 4)
+    assert(kind == 'button' and hit.id == control.id)
+end
+assert(model.hit(5, 5) == 'title')
+assert(model.hit(5, model.CLIENT_H - 5) == nil)
+pass('hit testing agrees with the painted control geometry')
+
+-- settings() must map onto the patch.configure() surface with rate multipliers.
+-- Reset first: the drag tests above deliberately moved the editor state.
+model.reset()
+local patch = {cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0}
+local wanted = model.settings(patch)
+assert(approx(wanted.budget, 2.0))
+assert(approx(wanted.patrol_count, 2.0))
+assert(approx(wanted.patrol_size, 2.0))
+assert(approx(wanted.encounter_cd_seconds, 2.0))
+assert(approx(wanted.patrol_cd_seconds, 2.0))
+assert(wanted.preset == 'heavy')
+model.pending.encounter_cd = 30.0
+model.pending.patrol_cd = 30.0
+model.pending.preset = 'native'
+wanted = model.settings(patch)
+assert(approx(wanted.encounter_cd_seconds, 30.0))
+assert(approx(wanted.patrol_cd_seconds, 30.0))
+assert(wanted.preset == 'native')
+pass('panel settings map onto the configure() seconds surface')
+
+-- apply() must forward to patch.configure() and remember what was committed.
+local captured
+local fake_patch = {
+    cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
+    configure = function(settings) captured = settings; return true end,
+}
+model.reset()
+assert(model.apply(fake_patch))
+assert(captured and approx(captured.patrol_count, 2.0) and captured.preset == 'heavy')
+assert(model.committed and approx(model.committed.budget, 2.0))
+local failing = {
+    cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
+    configure = function() return false, 'budget_out_of_range' end,
+}
+local ok, reason = model.apply(failing)
+assert(ok == false and reason == 'budget_out_of_range')
+assert(model.committed and approx(model.committed.budget, 2.0))
+pass('panel apply forwards to configure and reports rejections')
+
+-- A rejected apply must not disturb the pending editor state either.
+assert(approx(model.pending.budget, 2.0))
+pass('a rejected apply leaves the pending panel state intact')
+
+-- sync_from_patch must reflect a live profile, including the native preset.
+model.reset()
+model.sync_from_patch({budget_multiplier = 6.0, modifier_patrol_count = 0.1,
+                       modifier_travelers_max_unit = 2.0, encounter_deadline_enabled = true,
+                       encounter_max_interval = 2.0, modifier_patrol_cooldown = 6.0,
+                       cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
+                       template_bias_enabled = true, template_bias_light = 0.25,
+                       template_bias_heavy = 4.0})
+assert(approx(model.pending.budget, 6.0))
+assert(approx(model.pending.patrol_count, 0.1))
+assert(approx(model.pending.patrol_size, 2.0))
+assert(approx(model.pending.encounter_cd, 2.0))
+assert(approx(model.pending.patrol_cd, 2.0))
+assert(model.pending.preset == 'heavy')
+model.sync_from_patch({budget_multiplier = 2.0, modifier_patrol_count = 2.0,
+                       modifier_travelers_max_unit = 2.0, encounter_deadline_enabled = false,
+                       encounter_max_interval = 2.0, modifier_patrol_cooldown = 1.0,
+                       cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
+                       template_bias_enabled = true, template_bias_light = 3.6,
+                       template_bias_heavy = 0.25})
+assert(model.pending.preset == 'light_medium')
+-- Clamp disabled => slow end, even though a stale 2.0 interval is still present.
+assert(approx(model.pending.encounter_cd, 30.0))
+assert(approx(model.pending.patrol_cd, 30.0))
+model.sync_from_patch({budget_multiplier = 2.0, modifier_patrol_count = 2.0,
+                       modifier_travelers_max_unit = 2.0, encounter_deadline_enabled = false,
+                       encounter_max_interval = 30.0, modifier_patrol_cooldown = 1.0,
+                       cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
+                       template_bias_enabled = false})
+assert(model.pending.preset == 'native')
+pass('panel sync mirrors the live profile and preset')
+
+-- Reset must restore every documented default.
+model.pending.budget = 5.5
+model.pending.preset = 'native'
+model.pending.patrol_cd = 30.0
+model.reset()
+assert(approx(model.pending.budget, 2.0))
+assert(model.pending.preset == 'heavy')
+assert(approx(model.pending.patrol_cd, 2.0))
+pass('panel reset restores the documented defaults')
+
+print(count .. ' panel model checks passed; no window was created.')

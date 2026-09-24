@@ -1,4 +1,4 @@
--- Data-only spawn tuning profiles for the supported 1.8.45850.0 build.
+-- Data-only spawn tuning profiles for the supported 1.8.46015.0 build.
 -- Encounter points are a per-reinforcement composition budget from
 -- director+0x518B0, not a remaining pool. Timed Patrol/Straggler frequency comes
 -- from the resolved 0x43C config at director+0x519AC. The v18 profiles raise the
@@ -40,7 +40,8 @@ local patch = {
     template_bias_medium = 1.25,
     template_bias_heavy = 0.25,
     illuminate_guardforce_multiplier = 0.25,
-    -- Cap-table counts observed on 1.8.45317.0 and not remeasured on 1.8.45850.0.
+    -- Cap-table counts last measured on 1.8.45317.0; the section layout is unchanged
+    -- through 1.8.46015.0, so a mismatch still only labels the faction unknown.
     -- A mismatch only labels the faction unknown and skips Illuminate guard scaling.
     faction_cap_counts = {automaton = 61, terminid = 44, illuminate = 45},
     cap_multiplier = 10,
@@ -101,6 +102,151 @@ local patch = {
     max_group = 64,
     vanilla_patrol_max_floor = 12,
 }
+-- Live-reconfiguration surface for the in-game panel. The panel only ever
+-- assigns into these same fields, so the 0.1 s updater picks a change up on its
+-- next pass without a mission reload. Every value is range-checked before it is
+-- accepted; a rejected change must leave the previous configuration in place.
+patch.budget_min, patch.budget_max = 0.1, 6.0
+patch.modifier_min, patch.modifier_max = 0.1, 6.0
+-- Cooldown sliders are expressed as a target interval in seconds. The fast end
+-- is the aggressive preset; the slow end leaves the native curve untouched and
+-- disables the deadline clamp, so it corresponds to the game's own pacing
+-- (documented around 30 s for this setting). In between, the rate curve is
+-- interpolated. Only the reinforcement deadline has a true seconds-level lever;
+-- the patrol path is a rate curve, so its slider interpolates the same way and
+-- the seconds value is the target that curve is chosen to approximate.
+patch.cooldown_fast_seconds, patch.cooldown_slow_seconds = 2.0, 30.0
+-- The two paths have different fastest-end rate scales. Reinforcement keeps the
+-- 3x curve; the patrol refresh curve is pushed to 6x at the fast end because the
+-- patrol scheduling gate tolerates a much shorter cooldown than the
+-- reinforcement admission path. Both slow ends return the curve to native 1.0.
+patch.cooldown_fast_rate = 3.0          -- reinforcement fastest-end rate
+patch.patrol_cooldown_fast_rate = 6.0   -- patrol fastest-end rate
+patch.cooldown_min_seconds, patch.cooldown_max_seconds = patch.cooldown_fast_seconds, patch.cooldown_slow_seconds
+
+-- Map a target interval in seconds onto a rate curve plus, for the
+-- reinforcement path, the deadline clamp. t is 0 at the fast end and 1 at the
+-- slow end; at t == 1 the curve is left native and the clamp is disabled.
+-- fast_rate is supplied by the caller so the two paths can use different scales.
+local function cooldown_profile(seconds, fast_rate)
+    local span = patch.cooldown_slow_seconds - patch.cooldown_fast_seconds
+    if span <= 0 then return nil end
+    -- Inline NaN/huge guard: this helper is defined above the shared `finite`
+    -- local, which is not in scope at this point in the chunk.
+    if type(fast_rate) ~= 'number' or fast_rate ~= fast_rate or math.abs(fast_rate) == math.huge
+        or fast_rate < 1.0 then
+        return nil
+    end
+    local t = (seconds - patch.cooldown_fast_seconds) / span
+    if t < 0 or t > 1 then return nil end
+    local rate = fast_rate + (1.0 - fast_rate) * t
+    return rate, t < 1.0, seconds
+end
+patch.presets = {
+    -- Heavy focus, as used by the Fast Cadence line.
+    heavy = {light = 0.25, medium = 1.0, heavy = 4.0},
+    -- Light/medium focus, as used by the Light-Medium Bias line.
+    light_medium = {light = 3.6, medium = 1.25, heavy = 0.25},
+}
+
+-- Reject rather than clamp: a caller that asks for a value outside the
+-- supported range has a bug, and silently substituting a different multiplier
+-- would make the in-game panel disagree with the applied configuration.
+local function checked_range(value, low, high)
+    if type(value) ~= 'number' or value ~= value then return nil end
+    if value < low or value > high then return nil end
+    return value
+end
+
+-- settings = {budget, patrol_count, patrol_size,
+--             encounter_cd_seconds, patrol_cd_seconds, preset}
+-- budget / patrol_count / patrol_size are plain multipliers in
+--   [budget_min, budget_max] and [modifier_min, modifier_max].
+-- encounter_cd_seconds / patrol_cd_seconds are target intervals in
+--   [cooldown_fast_seconds, cooldown_slow_seconds]. The fast end scales the rate
+--   curve up and, for reinforcements, clamps the pending deadline; the slow end
+--   restores the native curve and removes the clamp.
+-- preset is 'heavy', 'light_medium' or 'native'.
+function patch.configure(settings)
+    if type(settings) ~= 'table' then return false, 'settings_not_a_table' end
+    local next_budget = settings.budget
+    if next_budget ~= nil then
+        next_budget = checked_range(next_budget, patch.budget_min, patch.budget_max)
+        if not next_budget then return false, 'budget_out_of_range' end
+    end
+    local next_patrol_count = settings.patrol_count
+    if next_patrol_count ~= nil then
+        next_patrol_count = checked_range(next_patrol_count, patch.modifier_min, patch.modifier_max)
+        if not next_patrol_count then return false, 'patrol_count_out_of_range' end
+    end
+    local next_patrol_size = settings.patrol_size
+    if next_patrol_size ~= nil then
+        next_patrol_size = checked_range(next_patrol_size, patch.modifier_min, patch.modifier_max)
+        if not next_patrol_size then return false, 'patrol_size_out_of_range' end
+    end
+    local next_encounter_cd = settings.encounter_cd_seconds
+    if next_encounter_cd ~= nil then
+        next_encounter_cd = checked_range(next_encounter_cd,
+            patch.cooldown_fast_seconds, patch.cooldown_slow_seconds)
+        if not next_encounter_cd then return false, 'encounter_cd_out_of_range' end
+    end
+    local next_patrol_cd = settings.patrol_cd_seconds
+    if next_patrol_cd ~= nil then
+        next_patrol_cd = checked_range(next_patrol_cd,
+            patch.cooldown_fast_seconds, patch.cooldown_slow_seconds)
+        if not next_patrol_cd then return false, 'patrol_cd_out_of_range' end
+    end
+    local preset = settings.preset
+    if preset ~= nil and preset ~= 'native' and not patch.presets[preset] then
+        return false, 'preset_unknown'
+    end
+
+    if next_budget then
+        patch.budget_multiplier = next_budget
+        patch.budget_override_multiplier = next_budget
+        -- The override is always pinned to the already-scaled director value, so
+        -- a budget change cannot be bypassed by a positive native override.
+        patch.force_override_to_base = true
+        patch.derive_override_from_base = false
+    end
+    if next_patrol_count then patch.modifier_patrol_count = next_patrol_count end
+    if next_patrol_size then patch.modifier_travelers_max_unit = next_patrol_size end
+    if next_encounter_cd then
+        local rate, clamp, seconds = cooldown_profile(next_encounter_cd, patch.cooldown_fast_rate)
+        if not rate then return false, 'encounter_cd_profile_mismatch' end
+        patch.modifier_encounter_cooldown = rate
+        patch.encounter_deadline_enabled = clamp
+        patch.encounter_max_interval = seconds
+    end
+    if next_patrol_cd then
+        local rate = cooldown_profile(next_patrol_cd, patch.patrol_cooldown_fast_rate)
+        if not rate then return false, 'patrol_cd_profile_mismatch' end
+        patch.modifier_patrol_cooldown = rate
+    end
+    if preset then
+        local weights = patch.presets[preset]
+        if weights then
+            patch.template_bias_enabled = true
+            patch.template_bias_light = weights.light
+            patch.template_bias_medium = weights.medium
+            patch.template_bias_heavy = weights.heavy
+        else
+            -- Reverting to native weights is handled by scale_candidate_weights,
+            -- which restores every weight this profile already wrote.
+            patch.template_bias_enabled = false
+        end
+    end
+    -- Once a curve has been scaled it stays enabled, because a scale of exactly
+    -- 1.0 is what restores the stored native baseline on a live switch back to
+    -- "native". Disabling the block would leave the scaled values in place.
+    local wanted_scale = (patch.modifier_patrol_count ~= 1.0)
+        or (patch.modifier_travelers_max_unit ~= 1.0)
+        or (patch.modifier_encounter_cooldown ~= 1.0)
+        or (patch.modifier_patrol_cooldown ~= 1.0)
+    patch.modifier_scale_enabled = patch.modifier_scale_enabled or wanted_scale
+    return true
+end
+
 local originals = {}
 local clones = {block = nil, size = 0}
 local resource_clone = {source = nil, block = nil, size = 0}
@@ -250,35 +396,37 @@ local function ensure_resource_clone(api, game, manager, root)
     resource_clone.source, resource_clone.block, resource_clone.size = root, block, size
     return block
 end
-local function scale_points(api, director, points)
+local function scale_points(api, director, points, budget)
     if not (points > 0) then return true end
     if not mission.points_original then
-        if mission.points_applied and near(points, mission.points_applied) then
-            mission.points_original = points / patch.budget_multiplier
-        else
-            mission.points_original = points
-        end
+        mission.points_original = points
     end
-    local target = mission.points_original * patch.budget_multiplier
+    local original = mission.points_original
+    local target = original * budget
     if near(points, target) then
         mission.points_applied = target
-    elseif points <= mission.points_original * 1.05 then
-        if not api.write(director + patch.points_offset, pack_f32(target))
-            or not near(number(api.read(director + patch.points_offset, 4), 0), target) then
-            return false, 'spawn_points_write_failed'
-        end
-        mission.points_applied = target
+        return true
+    end
+    -- Either the field still holds the value this profile last wrote, or the
+    -- native code consumed it back down toward the original point total. Both
+    -- mean the stored original stays authoritative, so a changed budget simply
+    -- writes the new target instead of adopting the scaled value as a baseline.
+    local ours = mission.points_applied and near(points, mission.points_applied)
+    local write
+    if ours or points <= original * 1.05 then
+        write = target
     elseif points > target * 1.05 then
         mission.points_original = points
-        target = points * patch.budget_multiplier
-        if not api.write(director + patch.points_offset, pack_f32(target))
-            or not near(number(api.read(director + patch.points_offset, 4), 0), target) then
-            return false, 'spawn_points_write_failed'
-        end
-        mission.points_applied = target
+        write = points * budget
     else
         mission.points_applied = points
+        return true
     end
+    if not api.write(director + patch.points_offset, pack_f32(write))
+        or not near(number(api.read(director + patch.points_offset, 4), 0), write) then
+        return false, 'spawn_points_write_failed'
+    end
+    mission.points_applied = write
     return true
 end
 local function scale_guardforce(api, director, guardforce, faction)
@@ -357,7 +505,26 @@ local function scheduler_status(api, game, director)
     return text
 end
 local function scale_candidate_weights(api, director)
-    if not patch.template_bias_enabled then return 0, 0 end
+    if not patch.template_bias_enabled then
+        -- A live switch back to native weights must undo the bias this profile
+        -- already wrote, otherwise the scaled weights would stay in place with
+        -- nothing left to restore them.
+        local restored = 0
+        if mission.weights then
+            for _, state in pairs(mission.weights) do
+                if state.applied and state.address
+                    and not near(state.applied, state.baseline) then
+                    if not api.write(state.address + patch.candidate_weight_offset,
+                                     pack_f32(state.baseline)) then
+                        return nil, 0, 'spawn_candidate_weight_restore_failed'
+                    end
+                    restored = restored + 1
+                end
+                state.applied = nil
+            end
+        end
+        return 0, 0
+    end
     local count_bytes = api.read(director + patch.candidate_count_offset, 4)
     if not count_bytes then return 0, 0, 'spawn_candidate_count_unreadable' end
     local count = u32(count_bytes, 0)
@@ -395,11 +562,12 @@ local function scale_candidate_weights(api, director)
         local key = tostring(index) .. ':' .. tostring(source) .. ':' .. string.format('%.3f', cost)
         local state = mission.weights[key]
         if not state then
-            state = {baseline = weight, applied = nil}
+            state = {baseline = weight, applied = nil, address = address}
             mission.weights[key] = state
         elseif state.applied and not near(weight, state.applied) and not near(weight, state.baseline) then
             state.baseline, state.applied = weight, nil
         end
+        state.address = address
         local density = cost / units
         candidates[#candidates + 1] = {address = address, state = state, density = density}
         densities[#densities + 1] = density
@@ -473,12 +641,18 @@ local function scale_modifier_block(api, address, offset, scale, label)
     for index = 0, MODIFIER_BLOCK_SIZE - 1 do
         local base = saved.baseline[index]
         if base ~= 0 then
-            local target = base * scale
             local live = current[index]
+            local target = base * scale
             if not near(live, target) then
-                if not near(live, base) then
-                    -- The row was legitimately re-blended for the new difficulty;
-                    -- adopt the new native value as the baseline instead of stacking.
+                -- Three cases reach this point. `live` equal to the stored
+                -- baseline means the game never took our value; `live` equal to
+                -- `base * saved.applied_scale` means it still holds the value
+                -- this profile last wrote. Both mean the stored baseline is
+                -- authoritative, so a scale change (including a live panel
+                -- change) just recomputes the target. Anything else is the game
+                -- re-blending a new native row, which becomes the new baseline.
+                local ours = saved.applied_scale and (base * saved.applied_scale) or base
+                if not (near(live, base) or near(live, ours)) then
                     saved.baseline[index] = live
                     target = live * scale
                 end
@@ -490,6 +664,7 @@ local function scale_modifier_block(api, address, offset, scale, label)
             end
         end
     end
+    saved.applied_scale = scale
     local head = api.read(address + offset, 4)
     return changed, head and number(head, 0) or -1
 end
@@ -936,7 +1111,7 @@ function patch.apply(api, game)
         end
     end
 
-    local ok, reason = scale_points(api, director, points)
+    local ok, reason = scale_points(api, director, points, patch.budget_multiplier)
     if not ok then return false, reason, false end
     local faction = faction_name(count)
     local guard_ok, scaled_guardforce = scale_guardforce(api, director, guardforce, faction)

@@ -1,6 +1,6 @@
 # Enemy Spawn Multiplier - technical reference
 
-Targets Steam build `25327279` / EXE `1.8.45850.0`. All addresses are `game.dll`
+Targets Steam build `25480438` / EXE `1.8.46015.0`. All addresses are `game.dll`
 RVAs or offsets from the named runtime object. The field identification below
 was worked out on `1.8.45317.0` from a plaintext typelib plus the community
 field-name JSON. The 1.8.45850.0 retarget was checked against a decrypted
@@ -10,6 +10,7 @@ that still quotes an old RVA is the previous build; use this table for the
 build the packages accept.
 
 | What | 1.8.45317.0 | 1.8.45850.0 |
+| --- | --- | --- |
 |---|---|---|
 | EXE SHA-256 | `A09FF526…88CC3` | `D8E23968…CA6827` |
 | `game.dll` SHA-256 | `CC75948D…5470C` | `73374BD4…E201F` |
@@ -347,7 +348,7 @@ the cooldown at `director+0x3A510` was never armed.
 Both profiles share one resource identity and one loader entry, so exactly one
 package may be installed.
 
-### v18 - `data-v18-native` / `data-v18-light-medium`
+### v20 - `data-v20-native` / `data-v20-light-medium`
 
 Encounter budget `6x` via `cfg+0x78`, nonzero caps and group clamp `10x`, timed
 intervals `/10`. Illuminate GuardForce budget is reduced to `0.25x` so static
@@ -356,7 +357,7 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Fast Cadence - `data-v18-fast-cadence`
+### Fast Cadence - `data-v20-fast-cadence`
 
 Reinforcement budget `0.4x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
@@ -393,6 +394,177 @@ Timed intervals are fixed at `0.0-0.1` s. They are inert on this build per
 section 5.1 but correct if the branch is ever reached. The maximum stays at `0.1`
 rather than `0` because a zero maximum makes the native code skip the path
 outright.
+
+### Local preview - `data-v20-preview-patrol-2x-3x`
+
+Raised from a live report that the `6x/6x` patrol pair still crashes lower-end
+machines. Every reinforcement setting is identical to Fast Cadence
+(`0.4x` budget, override forced to the scaled base, `0x164` cooldown `3.0x`,
+`0x1DC` patrol refresh `3.0x`, heavy-focus weighting, GuardForce native, timed
+intervals `0.0-0.1` s); only the patrol pair moves:
+
+| Curve | Fast Cadence | This preview |
+|---|---|---|
+| `0x1A0` patrol count | `6.0x` | **`2.0x`** |
+| `0x3F8` units per patrol wave | `6.0x` | **`3.0x`** |
+
+`0x1A0` selects how many patrols exist and `0x3F8` selects
+`round(base_units * curve)`, so the two are independent and the `2x count x 3x
+size` combination is a genuine reduction rather than a rescale. Peak entities per
+patrol wave fall from a base of 11 units to at most 33 instead of 66, and the
+number of concurrently allowed groups drops from `6x` to `2x`. Sustained pressure
+(`2 x 3 = 6`) is therefore one sixth of the Fast Cadence `6 x 6 = 36` under the
+same shared component gate of 448, which is the headroom the crash reports were
+consuming.
+
+Not part of the public release set: this is a local test profile built and kept
+only to compare against `Fast-Cadence-v18` on the reporting machine. It shares
+the same resource identity, so it must not be installed alongside any other
+Enemy Spawn Multiplier package.
+
+### Panel - `data-v20-panel`
+
+Same reinforcement shape as the `2x` preview (budget `2x`, patrol count `2x`, patrol
+size `2x`, short cooldowns, heavy-focus preset), but with an in-game configuration
+panel bound to the `F8` key.
+
+The panel title reads `EnemySpawnMultiplier v20 by Natsun`.
+
+The toggle key defaults to `F8`. When the separately installed
+[Mod Bindings Menu](https://github.com/CowboyBingus/ModBindingsMenu) addon is
+present, the panel registers its own MODS row (slot 2, the only third-party slot)
+and reads the player-assigned binding from it instead. Registration is retried
+until the addon appears, because the two addons may start in either order; a slot
+conflict stops the retries and the panel quietly keeps `F8`. The row text cannot
+be custom, because Mod Bindings Menu accepts only a game localization ID, so the
+row borrows the existing "TOGGLE MENU" string. Mod Bindings Menu is an optional
+dependency: without it nothing changes.
+
+The panel is a separate top-level Win32 window owned by the game process and painted
+with GDI. Loader v15 exposes no drawing API, and hooking the game's present path
+would require reaching outside the data-only boundary this project keeps, so a
+dedicated window is the only route that stays inside it. The window is created with
+`WS_EX_NOACTIVATE` and `WS_EX_TOOLWINDOW`, so clicking it never takes focus from the
+game, and `F8` is polled with `GetAsyncKeyState` rather than relying on keyboard
+focus. The message pump is restricted to this window's own queue; draining the
+thread-wide queue would break the game's input handling.
+
+Controls: five sliders and three radio buttons.
+
+| Control | Range / options | Default |
+|---|---|---|
+| `budget` (????) | `0.1x` .. `6.0x`, 0.1 step | `2.0x` |
+| `patrol_count` (????) | `0.1x` .. `6.0x`, 0.1 step | `2.0x` |
+| `patrol_size` (????) | `0.1x` .. `6.0x`, 0.1 step | `2.0x` |
+| `encounter_cd` (?? CD) | continuous `2 s` .. `30 s`, no numeric readout | `2 s` |
+| `patrol_cd` (?? CD) | continuous `2 s` .. `30 s`, no numeric readout | `2 s` |
+| template preset | heavy / light-medium / native | heavy |
+
+The two cooldown rows are continuous sliders labelled only ? at the left end and
+? at the right end. `2 s` is the fast end; `30 s` reproduces the game's own pacing
+because at that end both rate curves are returned to `1.0` and the reinforcement
+deadline clamp is switched off. Intermediate positions interpolate between the two
+endpoints.
+
+The two paths have different fastest-end scales. Reinforcement interpolates
+`3.0 .. 1.0`; the patrol refresh curve interpolates `6.0 .. 1.0`, because the
+patrol scheduling gate tolerates a much shorter cooldown than the reinforcement
+admission path. Only the reinforcement path has a true seconds-level lever (the
+deadline clamp); the patrol path is a rate curve, so its position selects the
+curve value that targets the corresponding interval. The row intentionally prints
+no number, so the panel never implies more precision on the patrol side than the
+underlying lever provides.
+
+The packaged Fast Cadence and `2x/3x` preview builds are unchanged and keep their
+long-standing `3.0` patrol cooldown, which is the value those profiles were tuned
+and live-tested with. The `6.0` fast end applies to the panel build's slider.
+
+The three presets map onto the same weight tables the packaged variants use:
+heavy is `0.25 / 1.0 / 4.0` (Fast Cadence), light-medium is `3.6 / 1.25 / 0.25`
+(Light-Medium Bias) and native leaves template weights untouched. Switching the
+preset back to native restores every weight this profile already wrote rather than
+merely stopping further writes.
+
+`??` commits the panel state through `patch.configure()`, which range-checks every
+value and rejects the whole request if any field is out of range, so the panel can
+never leave the live configuration in a half-applied state. The updater picks the new
+values up on its next 0.1 s pass, which is what makes a change take effect inside a
+running mission.
+
+Live reconfiguration is only safe because the scaling paths remember what they wrote.
+Each modifier block stores the native baseline plus the scale it last applied, so a
+changed multiplier recomputes `baseline * new_scale` instead of treating the already
+scaled value as a new baseline. The budget path distinguishes "the value we wrote"
+from "the native code consumed the field back down" so an increase or decrease never
+compounds. The panel is optional at the loader level: if window creation fails the
+gameplay patch keeps running and the failure is logged.
+
+The shipped log writer appends its `detail` argument, so every call site must
+supply both fields. v19 shipped one call site that passed only the status; the
+resulting `attempt to concatenate a nil value` was raised from inside the window
+procedure, escaped into the updater hook and tore the panel down for the rest of
+the session, leaving `F8` dead. Three defences now cover that class of fault:
+the writer normalises a missing detail, `panel.apply` is wrapped so a failure
+reports rather than raises, and each dispatched message is isolated so a bad
+handler costs one message instead of the whole panel. A regression test drives
+the real panel through the real writer and asserts the panel still pumps after
+`Apply`; reverting either fix makes that test fail.
+
+## 6a. 1.8.46015.0 retarget (v20, no address change)
+
+Steam build `25480438`. The hash gate did its job: the old package logged
+`Unsupported executable; no change applied` and refused to write.
+
+The offsets were re-derived from a fresh in-process image dump
+(`_game_images/game_image.bin`, taken by the read-only `hd2_build_dump` addon)
+and compared against the 1.8.45850.0 image:
+
+- 15 of 16 section virtual addresses are identical; only `.reloc` moved, and no
+  mod global lives there.
+- Every global the mod reads sits in section 2, whose VA and size are byte-identical
+  across the two builds.
+- `.pdata` reports the same function count (152693). The first structural change
+  is at RVA `0x1326020`; every function the mod depends on (`0x94E900` travelers
+  getter, `0x9511F0` scheduler, `0x957140` admission, `0xFE5280` modifier
+  evaluator) lies before it and is byte-identical apart from RIP-relative
+  displacements that shift by a constant amount.
+- The config layout is unchanged: `cfg_stride` `0x43C` and every field offset
+  (`0x164`, `0x1A0`, `0x1DC`, `0x3F8`, `0x78`, `0x620`, `0x660`, `0x6B0`, ...)
+  occurs the same number of times in both builds.
+
+The change is therefore a code addition late in `.text` plus new `.rdata`
+constants; nothing the patch pins had to move. Only the two build hashes and the
+build identifier changed.
+
+## 6b. Build policy: hashes warn, layout decides
+
+The runtime no longer refuses to run when the executable hash changes.
+
+Earlier revisions compared both module hashes against the build they were compiled
+for and stopped on any mismatch. That gate produced a false negative in practice:
+the 1.8.46015.0 update changed both hashes while moving none of the pinned
+addresses, so a fully working patch was blocked and required a manual dump-and-diff
+cycle to clear. Repeated across frequent updates, that cost is pure overhead.
+
+What actually keeps the writes safe is the runtime layer, not the hash:
+
+| Layer | Catches |
+|---|---|
+| slot probes (`anchor_check.lua`) | unreadable or implausible pointer slots, implausible row stride |
+| `read_config` field ranges | a config row whose fields are no longer where they were |
+| `writable_data` | a target that is no longer committed `MEM_PRIVATE/PAGE_READWRITE` |
+| cap-table walk | entry count / stride / ident shape changes |
+| read-back after every write | a write that silently did not take |
+
+There are 51 distinct rejection reasons across these paths, and every one of them
+fails closed for its own path only. A hash mismatch is reported as `unknown_build`
+and the patch proceeds; a layout change is caught by the probes and the guards.
+
+Consequence for maintenance: a normal update needs no action. Only a build that
+logs `anchor_warning` or a layout rejection needs the offsets re-derived. The
+installer-side build check still refuses to *build* against a tree whose hashes it
+does not recognise, so a package is never produced from an unexpected binary by
+accident.
 
 ## 7. Remaining native limits
 
@@ -440,11 +612,16 @@ second and rotated at 4 MB.
 
 ## 9. Validation status
 
-Offline: 24 synthetic checks on the data path, 9 Fast Cadence profile checks, and
-7 package checks. They cover budget and cap scaling, timer clamping, idempotence,
-config resolution, resource and cap-table cloning, template bias, mission
-rebuilds, queue and counter preservation, curve scaling from a stored baseline,
-re-blend recovery, heavy-tier candidate reweighting, and the failure paths.
+Offline: 24 synthetic checks on the data path, 15 profile checks shared by Fast
+Cadence, the panel build and the `2x/3x` preview, 12 panel-model checks, 6 bindings
+bridge checks, 6 anchor-probe checks, 8 real Win32 panel smoke checks, 8 panel
+loader-integration checks, and 7 package checks. They cover budget and cap scaling,
+timer clamping, idempotence, live reconfiguration without stacking, restoring
+candidate weights on a preset switch, config resolution, resource and cap-table
+cloning, template bias, mission rebuilds, queue and counter preservation, curve
+scaling from a stored baseline, re-blend recovery, heavy-tier candidate
+reweighting, the failure paths, and the panel's slider grid, hit testing, settings
+mapping, window creation, painting and teardown.
 Package checks verify the manifest, hashes, both resource identities, the exact
 v15 declaration and forwarding target, absence of custom DLLs, and absence of
 executable-page modification APIs.
@@ -486,7 +663,7 @@ pre-existing data profile.
 v17 promoted Fast Cadence without a played session of that exact budget step and
 patrol split. Those earlier played sessions were on Steam build `24826606` /
 EXE `1.8.45317.0`. v18 keeps that behaviour and only retargets all three
-packages to Steam build `25327279` / EXE `1.8.45850.0`, using the addresses in
+packages to Steam build `25480438` / EXE `1.8.46015.0`, using the addresses in
 the table at the top. That retarget has not been played either.
 `runtime_verified` therefore stays `false` in the manifests. Also not yet exercised
 live: Automaton and Illuminate, the Illuminate GuardForce adjustment, mission-to-

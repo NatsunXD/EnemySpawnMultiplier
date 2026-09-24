@@ -20,22 +20,22 @@ RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
 IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
 VARIANTS = {
     'base': {
-        'revision': 'data-v18-native',
-        'public_version': 'v18',
+        'revision': 'data-v20-native',
+        'public_version': 'v20',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
         'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and reduces Illuminate static-guard budget to preserve reinforcement capacity. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': False,
     },
     'light-medium': {
-        'revision': 'data-v18-light-medium',
-        'public_version': 'v18',
+        'revision': 'data-v20-light-medium',
+        'public_version': 'v20',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
         'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. Unsupported faction template layouts fall back to native weights instead of stopping the core tuning. Illuminate static-guard budget is reduced to preserve reinforcement capacity. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
     },
     'fast-cadence': {
-        'revision': 'data-v18-fast-cadence',
-        'public_version': 'v18',
+        'revision': 'data-v20-fast-cadence',
+        'public_version': 'v20',
         'name': 'Enemy Spawn Multiplier Fast Cadence',
         'description': 'Behaviour-focused spawn retuning. Enemy reinforcement arrives on a much shorter cooldown, and both reinforcement waves and their point budget are steered toward heavier units, while patrols spawn more frequently, in greater numbers and in larger groups. The per-wave reinforcement point budget is reduced, so a wave is composed of fewer but heavier units rather than being larger overall. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
@@ -54,6 +54,77 @@ VARIANTS = {
             'modifier_patrol_count': 6.0,
             'modifier_patrol_cooldown': 3.0,
             'modifier_travelers_max_unit': 6.0,
+            'template_bias_light': 0.25,
+            'template_bias_medium': 1.0,
+            'template_bias_heavy': 4.0,
+            'probe_timers_enabled': True,
+            'guardforce_write_enabled': False,
+            'illuminate_guardforce_multiplier': 1.0,
+            'interval_mode': 'fixed',
+            'fixed_interval_min': 0.0,
+            'fixed_interval_max': 0.1,
+            'allow_zero_interval_min': True,
+            'cap_multiplier': 10,
+            'group_multiplier': 10,
+        },
+    },
+    'panel': {
+        'revision': 'data-v20-panel',
+        'public_version': 'v20',
+        'name': 'Enemy Spawn Multiplier Panel',
+        'panel': True,
+        'description': 'Enemy Spawn Multiplier with the in-game configuration panel. Press F8 to open a compact overlay that exposes the reinforcement budget, patrol count, patrol size, reinforcement cooldown and patrol cooldown as live sliders, plus three template presets (heavy focus, light/medium focus, native). Changes apply to the running mission on the next updater pass. It starts from a conservative 2x budget, 2x patrol count, 2x patrol size, both cooldowns at the fast end (2 s) and the heavy-focus preset; the cooldown rows can be slid back toward the native pacing. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
+        'template_bias': True,
+        'overrides': {
+            'budget_multiplier': 2.0,
+            'budget_override_multiplier': 2.0,
+            'derive_override_from_base': False,
+            'force_override_to_base': True,
+            'encounter_deadline_enabled': True,
+            'encounter_max_interval': 2.0,
+            'traveler_cooldown_enabled': False,
+            'traveler_cooldown_min': 0.0,
+            'traveler_cooldown_max': 0.0,
+            'modifier_scale_enabled': True,
+            'modifier_encounter_cooldown': 3.0,
+            'modifier_patrol_count': 2.0,
+            'modifier_patrol_cooldown': 6.0,
+            'modifier_travelers_max_unit': 2.0,
+            'template_bias_light': 0.25,
+            'template_bias_medium': 1.0,
+            'template_bias_heavy': 4.0,
+            'probe_timers_enabled': True,
+            'guardforce_write_enabled': False,
+            'illuminate_guardforce_multiplier': 1.0,
+            'interval_mode': 'fixed',
+            'fixed_interval_min': 0.0,
+            'fixed_interval_max': 0.1,
+            'allow_zero_interval_min': True,
+            'cap_multiplier': 10,
+            'group_multiplier': 10,
+        },
+    },
+    'preview-patrol-2x-3x': {
+        'revision': 'data-v20-preview-patrol-2x-3x',
+        'public_version': 'v20-preview',
+        'name': 'Enemy Spawn Multiplier Preview Patrol 2x-3x',
+        'description': 'Local preview build for lower-end machines. Same reinforcement profile as Fast Cadence, but the patrol pair is rebalanced so far fewer entities are live at once: a smaller patrol count curve and smaller per-wave squad curve keep clear of the shared component gate that a crash-prone machine runs into. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
+        'template_bias': True,
+        'overrides': {
+            'budget_multiplier': 0.4,
+            'budget_override_multiplier': 0.4,
+            'derive_override_from_base': False,
+            'force_override_to_base': True,
+            'encounter_deadline_enabled': True,
+            'encounter_max_interval': 2.0,
+            'traveler_cooldown_enabled': False,
+            'traveler_cooldown_min': 0.0,
+            'traveler_cooldown_max': 0.0,
+            'modifier_scale_enabled': True,
+            'modifier_encounter_cooldown': 3.0,
+            'modifier_patrol_count': 2.0,
+            'modifier_patrol_cooldown': 3.0,
+            'modifier_travelers_max_unit': 3.0,
             'template_bias_light': 0.25,
             'template_bias_medium': 1.0,
             'template_bias_heavy': 4.0,
@@ -100,7 +171,7 @@ def main():
             print(run([sys.executable, Path(__file__), key]).strip())
         return
     if len(sys.argv) != 2 or sys.argv[1] not in VARIANTS:
-        raise SystemExit('Usage: build.py [base|light-medium|fast-cadence]')
+        raise SystemExit('Usage: build.py [base|light-medium|fast-cadence|panel|preview-patrol-2x-3x]')
     key = sys.argv[1]
     variant = VARIANTS[key]
     revision = variant['revision']
@@ -140,11 +211,19 @@ def main():
             raise ValueError('Unsupported game build: ' + relative)
     resources = build_module(ROOT, build, RESOURCE, 'spawn_patch.lua', revision,
                              template_bias=variant['template_bias'],
-                             overrides=variant.get('overrides'))
+                             overrides=variant.get('overrides'),
+                             with_panel=variant.get('panel', False))
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')
     tests = run([LUA, TESTS / 'test_data.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
-    if key == 'fast-cadence':
-        tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
+    if key in ('fast-cadence', 'preview-patrol-2x-3x', 'panel'):
+        tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes()),
+                             settings['modifier_patrol_count'], settings['modifier_travelers_max_unit']], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_panel_model.lua', SOURCE, build], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_bindings.lua', SOURCE], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_anchor_check.lua', SOURCE], env=env)
+    if os.name == 'nt':
+        tests += '\n' + run([LUA, TESTS / 'test_panel_smoke.lua', SOURCE], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_panel_loader.lua', SOURCE, BUILD], env=env)
     (build / 'offline-tests.txt').write_text(tests, encoding='utf-8')
     data = build / 'data'
     data.mkdir(exist_ok=True)
@@ -162,7 +241,7 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 18,
+        'version': 20,
         'public_version': variant['public_version'],
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],
@@ -241,6 +320,7 @@ def main():
         },
         'continuous_update_hook': True, 'shutdown_hook': False, 'executable_code_writes': 0,
         'executable_memory_changed': False,
+        'configuration_panel': bool(variant.get('panel', False)),
         'loader_integration': {
             'minimum_loader_version': 15, 'api': 1,
             'discovery_entry': RESOURCE, 'implementation_resource': IMPLEMENTATION_RESOURCE,
@@ -250,6 +330,12 @@ def main():
     }
     report['requires'] = [{'name': 'Bingus Shared Loader', 'guid': '612eaf70-d682-43c7-9efd-16dcc695f977',
                            'api': 1, 'minimum_version': 15}]
+    if variant.get('panel', False):
+        # Optional companion: without it the panel keeps its built-in F8 toggle.
+        report['optional_requires'] = [{'name': 'Mod Bindings Menu',
+                                        'guid': 'e40fc537-c2a2-493b-ad0f-2255c6a0174e',
+                                        'api': 1,
+                                        'purpose': 'custom toggle key; F8 is used when absent'}]
     sources = list(SOURCE.glob('*.lua')) + list(TESTS.glob('*.lua')) + list((ROOT / 'scripts').glob('*.py'))
     report['source_sha256'] = {path.relative_to(ROOT).as_posix(): sha(path.read_bytes()) for path in sources}
     release = package_release(ROOT, build, report)

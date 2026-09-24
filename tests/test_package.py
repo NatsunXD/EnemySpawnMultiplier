@@ -37,18 +37,26 @@ def main():
             offset = end + 4
         assert offset == len(png)
         expected_versions = {
-            'data-v18-native': 'v18',
-            'data-v18-light-medium': 'v18',
-            'data-v18-fast-cadence': 'v18',
+            'data-v20-native': 'v20',
+            'data-v20-light-medium': 'v20',
+            'data-v20-fast-cadence': 'v20',
+            'data-v20-preview-patrol-2x-3x': 'v20-preview',
+            'data-v20-panel': 'v20',
         }
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] == 'data-v18-fast-cadence':
-            assert change['budget_multiplier'] == 0.4
-            assert change['budget_override_multiplier'] == 0.4
+        if provenance['revision'] in ('data-v20-fast-cadence', 'data-v20-preview-patrol-2x-3x', 'data-v20-panel'):
+            expected_patrol_count, expected_travelers_max_unit = (6.0, 6.0)
+            if provenance['revision'] == 'data-v20-preview-patrol-2x-3x':
+                expected_patrol_count, expected_travelers_max_unit = 2.0, 3.0
+            elif provenance['revision'] == 'data-v20-panel':
+                expected_patrol_count, expected_travelers_max_unit = 2.0, 2.0
+            expected_budget = 2.0 if provenance['revision'] == 'data-v20-panel' else 0.4
+            assert change['budget_multiplier'] == expected_budget
+            assert change['budget_override_multiplier'] == expected_budget
             assert change['derive_override_from_base'] is False
             assert change['force_override_to_base'] is True
             assert change['encounter_deadline_offset'] == '0x399D8'
@@ -58,10 +66,14 @@ def main():
             assert change['encounter_max_interval'] == 2.0
             assert change['traveler_cooldown_enabled'] is False
             assert change['modifier_scale_enabled'] is True
+            # The patrol refresh curve has its own fastest end. The panel build
+            # ships that end at 6x; the Fast Cadence and preview builds keep the
+            # long-standing 3x value they were tuned and live-tested with.
+            expected_patrol_cd = 6.0 if provenance['revision'] == 'data-v20-panel' else 3.0
             assert change['modifier_scales'] == {'encounter_cooldown': 3.0,
-                                                 'patrol_count': 6.0,
-                                                 'patrol_cooldown': 3.0,
-                                                 'travelers_max_unit': 6.0}
+                                                 'patrol_count': expected_patrol_count,
+                                                 'patrol_cooldown': expected_patrol_cd,
+                                                 'travelers_max_unit': expected_travelers_max_unit}
             assert change['modifier_blocks']['encounter_cooldown_rate'] == '0x164'
             assert change['modifier_blocks']['patrol_count_max'] == '0x1A0'
             assert change['modifier_blocks']['patrol_spawn_cooldown_rate'] == '0x1DC'

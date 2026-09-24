@@ -17,9 +17,12 @@ What the packages do
   is made of fewer but heavier units rather than being larger overall. Patrols
   appear more frequently, in greater numbers, and in larger groups.
 
-The mod changes writable private data only. It does not modify executable code
-and does not call native spawn functions. Native population gates, position
-checks, template availability and queue processing all remain active.
+The mod changes writable private data only. A game update does not by itself
+disable it: the build hash is reported to the log but no longer blocks the
+patch, and every write is validated against the live layout before it lands.
+It does not modify executable code and does not call native spawn functions.
+Native population gates, position checks, template availability and queue
+processing all remain active.
 
 Install
 -------
