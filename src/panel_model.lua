@@ -170,6 +170,40 @@ return function()
         return M.pending
     end
 
+    -- Load a persisted profile onto the editor. Values are snapped onto the same
+    -- slider grid the mouse uses, so a file written by an older build can never
+    -- leave the knobs off-grid. Only recognised fields are accepted; a malformed
+    -- file therefore degrades to the affected defaults instead of being applied
+    -- wholesale. Returns true when at least one control was restored.
+    function M.import(settings)
+        if type(settings) ~= 'table' then return false end
+        local function snap_multiplier(value)
+            if type(value) ~= 'number' or value ~= value then return nil end
+            local steps = (value - M.SLIDER_MIN) / (M.SLIDER_MAX - M.SLIDER_MIN) * M.SLIDER_STEPS
+            return M.slider_to_value(steps)
+        end
+        local function snap_cooldown(value)
+            if type(value) ~= 'number' or value ~= value then return nil end
+            local steps = (value - M.COOLDOWN_FAST) / (M.COOLDOWN_SLOW - M.COOLDOWN_FAST) * M.COOLDOWN_STEPS
+            return M.cooldown_to_value(steps)
+        end
+        local changed = false
+        local snaps = {
+            budget = snap_multiplier, patrol_count = snap_multiplier, patrol_size = snap_multiplier,
+            encounter_cd = snap_cooldown, patrol_cd = snap_cooldown,
+        }
+        for key, snap in pairs(snaps) do
+            local value = snap(settings[key])
+            if value then M.pending[key] = value; changed = true end
+        end
+        local preset = settings.preset
+        if preset == 'heavy' or preset == 'light_medium' or preset == 'native' then
+            M.pending.preset = preset
+            changed = true
+        end
+        return changed
+    end
+
     function M.apply(patch)
         local ok, reason = patch.configure(M.settings(patch))
         if not ok then return false, reason end

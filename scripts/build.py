@@ -219,6 +219,9 @@ def main():
         tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes()),
                              settings['modifier_patrol_count'], settings['modifier_travelers_max_unit']], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_model.lua', SOURCE, build], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_config_store.lua', SOURCE, build], env=env)
+    if variant.get('panel', False) and os.name == 'nt':
+        tests += '\n' + run([LUA, TESTS / 'test_panel_config.lua', SOURCE, build], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_bindings.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_anchor_check.lua', SOURCE], env=env)
     if os.name == 'nt':

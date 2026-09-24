@@ -1,4 +1,5 @@
-return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors)
+return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors,
+                create_store)
     if _G.EnemySpawnMultiplier then return end
     local state = {revision = build.revision, active = false, status = '', detail = '', elapsed = 1.0}
     _G.EnemySpawnMultiplier = state
@@ -115,8 +116,15 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             })
             if built and instance then bindings = instance end
         end
+        -- The config store is optional too: when it is missing the panel simply
+        -- runs without persistence, which is what the smaller test harnesses do.
+        local store = nil
+        if create_store then
+            local built, instance = pcall(create_store)
+            if built and instance then store = instance end
+        end
         local created, instance, reason = pcall(create_panel, create_model, patch, {
-            log = log_line, state = state, bindings = bindings,
+            log = log_line, state = state, bindings = bindings, store = store,
             title = 'EnemySpawnMultiplier v20 by Natsun',
         })
         if created and instance then

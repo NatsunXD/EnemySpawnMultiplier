@@ -29,6 +29,12 @@
 模组会把诊断信息追加写入 `%LOCALAPPDATA%/EnemySpawnMultiplier.log`。
 提问时请附带当局log文件
 
+### 配置保存（面板版）
+
+带界面的 `Panel` 版本按 F8 打开面板，调整参数后点“应用”，当前配置会保存到
+`%LOCALAPPDATA%/EnemySpawnMultiplier.cfg`；下次启动游戏时会自动读取并生效，
+无需再次手动调整。配置文件损坏或缺失时会回退到内置默认值，不影响正常游戏。
+
 ## 🤝 参与贡献
 
 欢迎任何形式的贡献！以下是标准贡献流程：
@@ -65,6 +71,8 @@ Three mutually exclusive packages share one resource ID, so install exactly one.
 Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases), then install exactly one of the packages published on the releases page. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
 
 The mod changes writable private data only and does not modify executable pages. Native population gates, position checks, template availability and queue processing remain active. Diagnostics are appended to `%LOCALAPPDATA%/EnemySpawnMultiplier.log`.
+
+The panel build (F8) saves the committed profile to `%LOCALAPPDATA%/EnemySpawnMultiplier.cfg` and restores it automatically on the next launch, so a tuned configuration survives a restart. A missing or corrupt file falls back to the built-in defaults.
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 

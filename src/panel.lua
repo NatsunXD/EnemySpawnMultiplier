@@ -20,6 +20,10 @@ return function(create_model, patch, callbacks)
     -- binding the player assigned there; otherwise the built-in F8 fallback is
     -- used exactly as before.
     local bindings = callbacks.bindings
+    -- Optional local config store. When present, the committed profile is saved
+    -- on Apply and restored on the next game launch; when absent (as in the
+    -- smaller test harnesses) the panel behaves exactly as before.
+    local store = callbacks.store
     local TITLE = callbacks.title or 'EnemySpawnMultiplier'
     local ffi = require('ffi')
     local bit = require('bit')
@@ -176,6 +180,53 @@ return function(create_model, patch, callbacks)
         emit('panel_sync_error', tostring(sync_reason))
     end
 
+    -- ------------------------------------------------------------- persistence
+    -- Saves are best-effort and never raise: a read-only profile directory or a
+    -- full disk must not tear the panel down. The committed editor state is what
+    -- gets written, because that is the profile the patch is actually running.
+    local function save_settings()
+        if not store then return end
+        local called, ok, reason = pcall(store.save, model.pending)
+        if not called then
+            emit('config_save_error', tostring(ok))
+        elseif not ok then
+            emit('config_save_rejected', tostring(reason))
+        end
+    end
+
+    -- Restore the profile saved on a previous launch. This runs during addon
+    -- startup (before the first updater pass), so a saved configuration is live
+    -- without the player having to open the panel or touch a slider.
+    local function restore_settings()
+        if not store then return end
+        local called, saved, reason = pcall(store.load)
+        if not called then
+            emit('config_load_error', tostring(saved))
+            return
+        end
+        if not saved then
+            -- A first launch simply has no file yet; that is not a fault.
+            if reason and reason ~= 'not_found' then
+                emit('config_load_skipped', tostring(reason))
+            end
+            return
+        end
+        if not model.import(saved) then return end
+        local applied, apply_reason = model.apply(patch)
+        if applied then
+            local p = model.pending
+            emit('config_restored', string.format(
+                'budget=%.1f count=%.1f size=%.1f enc_cd=%.0fs patrol_cd=%.0fs preset=%s',
+                p.budget, p.patrol_count, p.patrol_size, p.encounter_cd, p.patrol_cd, p.preset))
+        else
+            -- A stored profile this build rejects must not leave the editor
+            -- showing values that were never applied; fall back to the live one.
+            emit('config_restore_rejected', tostring(apply_reason))
+            pcall(model.sync_from_patch, patch)
+        end
+    end
+    restore_settings()
+
     function panel.apply()
         -- Applying must never raise: this runs from the window procedure, and an
         -- error there would escape into the updater hook.
@@ -195,6 +246,8 @@ return function(create_model, patch, callbacks)
         emit('panel_applied', string.format(
             'budget=%.1f count=%.1f size=%.1f enc_cd=%.0fs patrol_cd=%.0fs preset=%s',
             p.budget, p.patrol_count, p.patrol_size, p.encounter_cd, p.patrol_cd, p.preset))
+        -- Persist exactly what was just committed so the next launch restores it.
+        save_settings()
         return true
     end
 
