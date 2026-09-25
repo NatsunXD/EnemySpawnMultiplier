@@ -15,12 +15,12 @@ local model = create_model()
 -- Defaults requested for the panel: 2x budget/count, both cooldowns short,
 -- heavy template preset. Patrol size is not a panel control.
 assert(model.pending.budget == 2.0)
-assert(model.pending.patrol_count == 2.0)
+assert(model.pending.patrol_count == 1.0)
 assert(model.pending.patrol_size == 1.0)
 assert(approx(model.pending.encounter_cd, 2.0))
 assert(approx(model.pending.patrol_cd, 2.0))
 assert(model.pending.preset == 'heavy')
-pass('panel defaults to 2x budget/count, fast cooldowns and heavy')
+pass('panel defaults to 2x budget, 1x patrol count, fast cooldowns and heavy')
 
 -- Five sliders and three radios, in the documented order.
 local widgets = model.layout()
@@ -104,7 +104,7 @@ model.reset()
 local patch = {cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0}
 local wanted = model.settings(patch)
 assert(approx(wanted.budget, 2.0))
-assert(approx(wanted.patrol_count, 2.0))
+assert(approx(wanted.patrol_count, 1.0))
 assert(approx(wanted.patrol_size, 1.0))
 assert(approx(wanted.encounter_cd_seconds, 2.0))
 assert(approx(wanted.patrol_cd_seconds, 2.0))
@@ -126,7 +126,7 @@ local fake_patch = {
 }
 model.reset()
 assert(model.apply(fake_patch))
-assert(captured and approx(captured.patrol_count, 2.0) and captured.preset == 'heavy')
+assert(captured and approx(captured.patrol_count, 1.0) and captured.preset == 'heavy')
 assert(model.committed and approx(model.committed.budget, 2.0))
 local failing = {
     cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
@@ -182,5 +182,54 @@ assert(approx(model.pending.budget, 2.0))
 assert(model.pending.preset == 'heavy')
 assert(approx(model.pending.patrol_cd, 2.0))
 pass('panel reset restores the documented defaults')
+
+-- Risk thresholds drive the red value text and the corner warning. The boundary
+-- is strict "greater than", so exactly 1.5 / 1.0 is still safe.
+model.reset()
+model.pending.patrol_count, model.pending.patrol_size = 1.5, 1.0
+assert(model.at_risk({key = 'patrol_count'}) == false, 'exactly 1.5 must be safe')
+assert(model.at_risk({key = 'patrol_size'}) == false, 'exactly 1.0 must be safe')
+assert(model.pressure_warning() == false)
+
+model.pending.patrol_count = 1.6
+assert(model.at_risk({key = 'patrol_count'}) == true, 'above 1.5 must warn')
+assert(model.pressure_warning() == true)
+model.pending.patrol_count = 1.5
+model.pending.patrol_size = 1.1
+assert(model.at_risk({key = 'patrol_count'}) == false)
+assert(model.at_risk({key = 'patrol_size'}) == true, 'above 1.0 must warn')
+assert(model.pressure_warning() == true)
+pass('pressure warning uses a strict threshold on the patrol pair')
+
+-- The shipped defaults (1.0 / 1.0) sit exactly on both thresholds, which is the
+-- boundary the predicate treats as safe, so a fresh panel must NOT warn. Recorded
+-- so a future change to the defaults or thresholds has to decide this deliberately.
+model.reset()
+assert(model.pending.patrol_count == 1.0 and model.pending.patrol_size == 1.0)
+assert(model.pressure_warning() == false, 'the shipped defaults must land in the safe range')
+pass('the shipped panel defaults land in the safe range')
+
+-- No other row may ever raise the warning.
+model.reset()
+model.pending.patrol_count, model.pending.patrol_size = 1.0, 1.0
+model.pending.budget = 6.0
+model.pending.encounter_cd = 30.0
+model.pending.patrol_cd = 30.0
+assert(model.pressure_warning() == false, 'only the patrol pair may warn')
+for _, key in ipairs({'budget', 'encounter_cd', 'patrol_cd'}) do
+    assert(model.at_risk({key = key}) == false)
+end
+pass('only patrol count and patrol size can raise the pressure warning')
+
+-- The warning is display-only: a risky profile must still be accepted.
+local risky_patch = {
+    cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
+    configure = function() return true end,
+}
+model.reset()
+model.pending.patrol_count, model.pending.patrol_size = 6.0, 2.0
+assert(model.pressure_warning() == true)
+assert(model.apply(risky_patch) == true, 'a risky profile must still be applicable')
+pass('the pressure warning never blocks Apply')
 
 print(count .. ' panel model checks passed; no window was created.')

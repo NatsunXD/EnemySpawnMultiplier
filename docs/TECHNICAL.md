@@ -371,7 +371,7 @@ the cooldown at `director+0x3A510` was never armed.
 Both profiles share one resource identity and one loader entry, so exactly one
 package may be installed.
 
-### v20 - `data-v20-native` / `data-v20-light-medium`
+### v21 - `data-v21-native` / `data-v21-light-medium`
 
 Encounter budget `6x` via `cfg+0x78`, nonzero caps and group clamp `10x`, timed
 intervals `/10`. Illuminate GuardForce budget is reduced to `0.25x` so static
@@ -380,7 +380,7 @@ keeps template weights; `Light-Medium Bias` ranks candidates by cost per planned
 unit (lowest 50% `3.6x`, next 30% `1.25x`, highest 20% `0.25x`) and falls back to
 native weights on an unsupported layout instead of aborting the core tuning.
 
-### Fast Cadence - `data-v20-fast-cadence`
+### Fast Cadence - `data-v21-fast-cadence`
 
 Reinforcement budget `0.4x`, and `cfg+0x78` is forced to the already-scaled
 director base so a positive native override cannot bypass the reduction.
@@ -418,7 +418,7 @@ section 5.1 but correct if the branch is ever reached. The maximum stays at `0.1
 rather than `0` because a zero maximum makes the native code skip the path
 outright.
 
-### Local preview - `data-v20-preview-patrol-2x-3x`
+### Local preview - `data-v21-preview-patrol-2x-3x`
 
 Raised from a live report that the `6x/6x` patrol pair still crashes lower-end
 machines. Every reinforcement setting is identical to Fast Cadence
@@ -445,13 +445,13 @@ only to compare against `Fast-Cadence-v18` on the reporting machine. It shares
 the same resource identity, so it must not be installed alongside any other
 Enemy Spawn Multiplier package.
 
-### Panel - `data-v20-panel`
+### Panel - `data-v21-panel`
 
 Same reinforcement shape as the `2x` preview (budget `2x`, patrol count `2x`, patrol
 size `2x`, short cooldowns, heavy-focus preset), but with an in-game configuration
 panel bound to the `F8` key.
 
-The panel title reads `EnemySpawnMultiplier v20 by Natsun`.
+The panel title reads `EnemySpawnMultiplier v21 by Natsun`.
 
 The toggle key defaults to `F8`. When the separately installed
 [Mod Bindings Menu](https://github.com/CowboyBingus/ModBindingsMenu) addon is
@@ -533,7 +533,7 @@ handler costs one message instead of the whole panel. A regression test drives
 the real panel through the real writer and asserts the panel still pumps after
 `Apply`; reverting either fix makes that test fail.
 
-## 6a. 1.8.46015.0 retarget (v20, no address change)
+## 6a. 1.8.46015.0 retarget (v21, no address change)
 
 Steam build `25480438`. The hash gate did its job: the old package logged
 `Unsupported executable; no change applied` and refused to write.

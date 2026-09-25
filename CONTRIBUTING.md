@@ -17,7 +17,7 @@ python -B scripts/build.py
 The builder verifies the supported EXE and game.dll hashes, compiles the maintained
 panel build, runs synthetic memory checks, and inspects the archive in Python. Run
 `python -B scripts/build.py` or `python -B scripts/build.py panel` to build
-`releases/Enemy-Spawn-Multiplier-Panel-Blackbox-v20-blackbox.zip`. The builder does
+`releases/Enemy-Spawn-Multiplier-Panel-Blackbox-v21-blackbox.zip`. The builder does
 not install or launch the game.
 
 This package requires the official Bingus Shared Loader v15 or newer. The archive exposes a plaintext `mods/cowboybingus/enemy_spawn_multiplier` discovery entry and keeps the compiled implementation in `mods/cowboybingus/enemy_spawn_multiplier_impl`. The v15 loader discovers the entry without a coordinator-list edit; the stable entry name also remains compatible with legacy explicit registration.

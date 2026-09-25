@@ -20,22 +20,22 @@ RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
 IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
 VARIANTS = {
     'base': {
-        'revision': 'data-v20-native',
-        'public_version': 'v20',
+        'revision': 'data-v21-native',
+        'public_version': 'v21',
         'name': 'Enemy Spawn Multiplier 6x Native Composition',
         'description': 'Uses the native encounter budget override path at 6x, scales nonzero per-type caps and the group clamp to 10x, shortens Patrol/Straggler intervals to one tenth, and reduces Illuminate static-guard budget to preserve reinforcement capacity. Native template weights, population gates and executable code remain unchanged. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': False,
     },
     'light-medium': {
-        'revision': 'data-v20-light-medium',
-        'public_version': 'v20',
+        'revision': 'data-v21-light-medium',
+        'public_version': 'v21',
         'name': 'Enemy Spawn Multiplier 6x Light-Medium Bias',
         'description': 'Uses the data-only spawn multipliers and favors Encounter templates with lower cost per unit. Unsupported faction template layouts fall back to native weights instead of stopping the core tuning. Illuminate static-guard budget is reduced to preserve reinforcement capacity. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
     },
     'fast-cadence': {
-        'revision': 'data-v20-fast-cadence',
-        'public_version': 'v20',
+        'revision': 'data-v21-fast-cadence',
+        'public_version': 'v21',
         'name': 'Enemy Spawn Multiplier Fast Cadence',
         'description': 'Behaviour-focused spawn retuning. Enemy reinforcement arrives on a much shorter cooldown, and both reinforcement waves and their point budget are steered toward heavier units, while patrols spawn more frequently, in greater numbers and in larger groups. The per-wave reinforcement point budget is reduced, so a wave is composed of fewer but heavier units rather than being larger overall. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
@@ -69,11 +69,11 @@ VARIANTS = {
         },
     },
     'panel': {
-        'revision': 'data-v20-panel-blackbox',
-        'public_version': 'v20-blackbox',
+        'revision': 'data-v21-panel-blackbox',
+        'public_version': 'v21-blackbox',
         'name': 'Enemy Spawn Multiplier Panel Blackbox',
         'panel': True,
-        'description': 'Panel build with a light always-on blackbox for crash triage. Press F8 for the configuration overlay; use Export game log to dump the live log/cfg onto the Desktop. Starts from 2x budget, 2x patrol count, 1x patrol size adjustable from 0.1x to 2x, both cooldowns at the fast end (2 s) and the heavy-focus preset. Logs updater cost and resource-clone events. Changes writable private data only. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Panel build with a light always-on blackbox for crash triage. Press F8 for the configuration overlay; use Export game log to dump the live log/cfg onto the Desktop. Starts from 2x budget, 1x patrol count, 1x patrol size adjustable from 0.1x to 2x, both cooldowns at the fast end (2 s) and the heavy-focus preset. Logs updater cost and resource-clone events. Changes writable private data only. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
         'overrides': {
             'budget_multiplier': 2.0,
@@ -87,7 +87,7 @@ VARIANTS = {
             'traveler_cooldown_max': 0.0,
             'modifier_scale_enabled': True,
             'modifier_encounter_cooldown': 3.0,
-            'modifier_patrol_count': 2.0,
+            'modifier_patrol_count': 1.0,
             'modifier_patrol_cooldown': 6.0,
             'modifier_travelers_max_unit': 1.0,
             'template_bias_light': 0.25,
@@ -105,8 +105,8 @@ VARIANTS = {
         },
     },
     'preview-patrol-2x-3x': {
-        'revision': 'data-v20-preview-patrol-2x-3x',
-        'public_version': 'v20-preview',
+        'revision': 'data-v21-preview-patrol-2x-3x',
+        'public_version': 'v21-preview',
         'name': 'Enemy Spawn Multiplier Preview Patrol 2x-3x',
         'description': 'Local preview build for lower-end machines. Same reinforcement profile as Fast Cadence, but the patrol pair is rebalanced so far fewer entities are live at once: a smaller patrol count curve and smaller per-wave squad curve keep clear of the shared component gate that a crash-prone machine runs into. Changes writable private data only, verifies the supported game build before writing, keeps every changed value restorable from a stored baseline so repeated updates cannot stack, and never modifies executable code or calls native spawn functions. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
@@ -224,6 +224,7 @@ def main():
         tests += '\n' + run([LUA, TESTS / 'test_panel_config.lua', SOURCE, build], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_bindings.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_anchor_check.lua', SOURCE], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_panel_paint.lua', SOURCE], env=env)
     if os.name == 'nt':
         tests += '\n' + run([LUA, TESTS / 'test_panel_smoke.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_loader.lua', SOURCE, BUILD], env=env)
@@ -244,7 +245,7 @@ def main():
              for suffix in ('', '.stream', '.gpu_resources')}
     report = {
         'name': variant['name'], 'slug': 'EnemySpawnMultiplier',
-        'version': 20,
+        'version': 21,
         'public_version': variant['public_version'],
         'guid': '7d2c8e41-5b6a-4f19-9e3d-1a84c0b572fe', 'revision': revision,
         'description': variant['description'],

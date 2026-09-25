@@ -136,10 +136,12 @@ return function(create_model, patch, callbacks)
     local C_BUTTON   = rgb(0x33, 0x33, 0x33)
     local C_OK       = rgb(0x6E, 0xC7, 0x7A)
     local C_WARN     = rgb(0xE0, 0xB4, 0x5A)
+    local C_DANGER   = rgb(0xE5, 0x5B, 0x5B)
     local FOOTER_WAITING = '尚未进入建立：修改已保存，进图后生效'
     local FOOTER_ACTIVE  = '已生效'
     local CD_FAST_LABEL  = '快'
     local CD_SLOW_LABEL  = '慢'
+    local PRESSURE_WARNING = '当前配置压力较大，闪退风险高'
 
     local CLIENT_W, CLIENT_H = model.CLIENT_W, model.CLIENT_H
 
@@ -349,11 +351,14 @@ return function(create_model, patch, callbacks)
                 draw_text(memory, CD_FAST_LABEL, track_x - 34, item.y, 28, item.h, C_DIM, true)
                 draw_text(memory, CD_SLOW_LABEL, track_x + track_w + 6, item.y, 28, item.h, C_DIM, true)
             else
-                draw_text(memory, model.format(item), item.x + item.w - 72, item.y, 72, item.h, C_TITLE)
+                -- The value turns red while this row is over its risk threshold, so
+                -- the cause of the corner warning is visible at a glance.
+                local value_color = model.at_risk(item) and C_DANGER or C_TITLE
+                draw_text(memory, model.format(item), item.x + item.w - 72, item.y, 72, item.h, value_color)
             end
         end
 
-        draw_text(memory, '模板预设', 24, 216, 200, 20, C_DIM)
+        draw_text(memory, '模板预设', 24, model.PRESET_HEADER_Y, 200, 20, C_DIM)
         for _, item in ipairs(widgets.radios) do
             local selected = model.pending[item.key] == item.value
             local cx, cy = item.x + 8, item.y + item.h / 2
@@ -389,7 +394,14 @@ return function(create_model, patch, callbacks)
         if panel.status ~= '' and os.clock() < panel.status_until then
             footer, footer_color = panel.status, C_OK
         end
-        draw_text(memory, footer, 24, 370, CLIENT_W - 48, 24, footer_color)
+        draw_text(memory, footer, 24, model.BUTTONS_Y + 40, CLIENT_W - 48, 24, footer_color)
+
+        -- High-pressure warning, bottom right. It reflects the editor state, so it
+        -- appears as soon as a slider crosses the threshold and clears when the
+        -- player moves it back; Apply is not required.
+        if model.pressure_warning() then
+            draw_text(memory, PRESSURE_WARNING, 264, CLIENT_H - 26, CLIENT_W - 288, 22, C_WARN, true)
+        end
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)
         gdi32.SelectObject(memory, old_bitmap)

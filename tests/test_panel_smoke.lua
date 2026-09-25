@@ -101,7 +101,7 @@ local bridge = {
 }
 local ok2, panel2, reason2 = pcall(create_panel, create_model, patch, {
     log = function() end, state = {active = false},
-    bindings = bridge, title = 'EnemySpawnMultiplier v20 by Natsun',
+    bindings = bridge, title = 'EnemySpawnMultiplier v21 by Natsun',
 })
 assert(ok2 and panel2 ~= nil, 'panel with bindings failed: ' .. tostring(reason2))
 assert(bound.registered, 'the bridge was never asked to register')

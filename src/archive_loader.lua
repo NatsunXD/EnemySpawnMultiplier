@@ -191,7 +191,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         local created, instance, reason = pcall(create_panel, create_model, patch, {
             log = log_line, state = state, bindings = bindings, store = store,
             export_diag = export_pack,
-            title = 'EnemySpawnMultiplier v20 blackbox',
+            title = 'EnemySpawnMultiplier v21 by Natsun',
         })
         if created and instance then
             panel = instance

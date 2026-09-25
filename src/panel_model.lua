@@ -6,13 +6,19 @@
 return function()
     local M = {}
 
-    -- Width fits the full 'EnemySpawnMultiplier v20 by Natsun' title plus the
+    -- Width fits the full 'EnemySpawnMultiplier v21 by Natsun' title plus the
     -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 560, 400
+    M.CLIENT_W, M.CLIENT_H = 560, 452
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
     M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
     M.PATROL_SIZE_STEPS = 19
+
+    -- Above these values the spawn load gets heavy enough that players have
+    -- reported crashes. The panel only warns; nothing is clamped, so a player who
+    -- wants the load can still set it.
+    M.PATROL_COUNT_RISK = 1.5
+    M.PATROL_SIZE_RISK = 1.0
 
     -- Cooldown controls are a continuous interval in seconds: 2 s at the fast
     -- end, 30 s (native pacing) at the slow end.
@@ -20,7 +26,7 @@ return function()
     M.COOLDOWN_STEPS = 28 -- 1 s grid across 2 .. 30
 
     local DEFAULTS = {
-        budget = 2.0, patrol_count = 2.0, patrol_size = 1.0,
+        budget = 2.0, patrol_count = 1.0, patrol_size = 1.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
     }
 
@@ -56,15 +62,25 @@ return function()
             item.track_x, item.track_w = item.x + 126, item.w - 126 - 78
             item.track_y = item.y + 16
         end
+        -- Preset block sits below the slider rows. Derived from the slider
+        -- block so adding a slider or changing the row pitch cannot silently
+        -- overlap the radios again.
+        local last_slider = sliders[#sliders]
+        M.PRESET_HEADER_Y = last_slider.y + last_slider.h + 6
+        local presets_y = M.PRESET_HEADER_Y + 24
         local radios = {}
         for index, def in ipairs(RADIO_LABELS) do
             radios[index] = {key = 'preset', value = def.value, label = def.label,
-                             x = 28, y = 240 + (index - 1) * 28, w = M.CLIENT_W - 56, h = 24}
+                             x = 28, y = presets_y + (index - 1) * 28,
+                             w = M.CLIENT_W - 56, h = 24}
         end
+        local last_radio = radios[#radios]
+        local buttons_y = last_radio.y + last_radio.h + 16
+        M.BUTTONS_Y = buttons_y
         local buttons = {
-            {id = 'apply', label = '应用', x = 72, y = 332, w = 92, h = 32, accent = true},
-            {id = 'reset', label = '重置', x = 180, y = 332, w = 92, h = 32},
-            {id = 'export', label = '导出游戏日志', x = 288, y = 332, w = 148, h = 32},
+            {id = 'apply', label = '应用', x = 72, y = buttons_y, w = 92, h = 32, accent = true},
+            {id = 'reset', label = '重置', x = 180, y = buttons_y, w = 92, h = 32},
+            {id = 'export', label = '导出游戏日志', x = 288, y = buttons_y, w = 148, h = 32},
         }
         return {sliders = sliders, radios = radios, buttons = buttons}
     end
@@ -108,6 +124,20 @@ return function()
             M.pending[item.key] = math.floor((min + math.floor(ratio * steps + 0.5) * (max - min) / steps) * 10 + 0.5) / 10
         end
         return M.pending[item.key]
+    end
+
+    -- Is this slider currently in the high-pressure region? Only the patrol pair
+    -- has thresholds; every other row is never "at risk".
+    function M.at_risk(item)
+        if item.key == 'patrol_count' then return M.pending.patrol_count > M.PATROL_COUNT_RISK end
+        if item.key == 'patrol_size' then return M.pending.patrol_size > M.PATROL_SIZE_RISK end
+        return false
+    end
+
+    -- True when any slider is over its threshold. The panel uses this for the
+    -- corner warning; it is a display-only signal and never blocks Apply.
+    function M.pressure_warning()
+        return M.at_risk({key = 'patrol_count'}) or M.at_risk({key = 'patrol_size'})
     end
 
     -- Cooldown sliders deliberately show no number: the requested UI is just the
