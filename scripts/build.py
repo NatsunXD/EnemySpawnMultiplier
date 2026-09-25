@@ -1,4 +1,4 @@
-﻿"""Build and verify Enemy Spawn Multiplier variants without launching the game."""
+"""Build and verify Enemy Spawn Multiplier variants without launching the game."""
 import json
 import os
 from pathlib import Path
@@ -358,4 +358,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
