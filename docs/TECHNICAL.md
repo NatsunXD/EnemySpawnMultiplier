@@ -589,6 +589,44 @@ installer-side build check still refuses to *build* against a tree whose hashes 
 does not recognise, so a package is never produced from an unexpected binary by
 accident.
 
+## 6c. Cross-addon FFI collisions (ClickableScrollbars)
+
+LuaJIT's `ffi.cdef` namespace is shared by every addon in the VM and the **first
+declaration of a name wins**. A second `ffi.cdef` for the same symbol is accepted
+silently, but the prototype that actually governs calls is the first one.
+
+ClickableScrollbars declares:
+
+```c
+typedef struct { int left, top, right, bottom; } HD2CS_RECT;
+int GetClientRect(void *window, HD2CS_RECT *rect);
+```
+
+The panel declared `int32_t GetClientRect(void*, void*)`. When ClickableScrollbars
+loaded first, the panel's declaration was discarded. Passing the panel's own RECT
+then failed with `cannot convert 'struct ...' to 'struct ... *'`, raised **from
+inside `WM_PAINT`**. An error escaping that window procedure terminates the
+process, which is the reported "F8 crashes when both mods are installed".
+
+Reproduced offline before fixing: installing the competing declarations and then
+showing the panel exited `3221226525` (`0xC000027B`) with no output, and bisecting
+showed `GetClientRect` alone was sufficient. `GetCursorPos` is the same shape and
+would fail for the same reason.
+
+**Fix.** The panel no longer calls through the shared namespace. Each Win32 export
+is cast to a private function-pointer typedef (`ESP_*_t`) at load time and called
+through that, so the prototype in force is the one compiled here regardless of what
+any other addon declared. The types the panel passes are likewise private
+(`ESP_RECT`, `ESP_POINT`).
+
+Errors raised inside the window procedure are also contained: the pump wraps each
+`DispatchMessageA` in `pcall`, so one bad message costs that message instead of the
+process.
+
+`tests/test_ffi_collision.lua` locks this in: it installs the competing declarations
+verbatim, brings the real panel up, forces `WM_PAINT`, applies and redraws. Reverting
+the private bindings makes it fail, so the test genuinely guards this bug.
+
 ## 7. Remaining native limits
 
 The checks at `0x947E69`, `0x947E79`, `0x9512B9` and `0x9512C5` are untouched.

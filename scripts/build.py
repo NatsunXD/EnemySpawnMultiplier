@@ -226,6 +226,8 @@ def main():
     tests += '\n' + run([LUA, TESTS / 'test_anchor_check.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_paint.lua', SOURCE], env=env)
     if os.name == 'nt':
+        tests += '\n' + run([LUA, TESTS / 'test_ffi_collision.lua', SOURCE], env=env)
+    if os.name == 'nt':
         tests += '\n' + run([LUA, TESTS / 'test_panel_smoke.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_loader.lua', SOURCE, BUILD], env=env)
     (build / 'offline-tests.txt').write_text(tests, encoding='utf-8')

@@ -88,9 +88,135 @@ return function(create_model, patch, callbacks)
                           uint32_t quality, uint32_t pitch, const char *face);
     ]]
 
-    local user32 = ffi.load('user32')
-    local gdi32 = ffi.load('gdi32')
-    local kernel32 = ffi.load('kernel32')
+    local user32_lib = ffi.load('user32')
+    local gdi32_lib = ffi.load('gdi32')
+    local kernel32_lib = ffi.load('kernel32')
+
+    -- Bind every Win32 entry point to a private function pointer.
+    --
+    -- LuaJIT's ffi.cdef namespace is shared by every addon in the VM and the first
+    -- declaration of a name wins. ClickableScrollbars declares
+    -- `int GetClientRect(void*, HD2CS_RECT*)`; because it loads first, our own
+    -- `GetClientRect(void*, void*)` declaration is discarded, and passing our RECT
+    -- raises a conversion error from inside WM_PAINT. An error escaping that
+    -- window procedure kills the process, which is the reported F8 crash.
+    --
+    -- Calling through these private typedefs takes the shared declaration out of
+    -- the picture: the prototype used at the call site is the one written here, no
+    -- matter what any other addon put into the namespace.
+    ffi.cdef [[
+        typedef struct { int32_t left, top, right, bottom; } ESP_RECT;
+        typedef struct { int32_t x, y; } ESP_POINT;
+
+        typedef int32_t (*ESP_GetAsyncKeyState_t)(int32_t);
+        typedef void   *(*ESP_GetModuleHandleA_t)(const char *);
+        typedef int32_t (*ESP_GetWindowThreadProcessId_t)(void *, uint32_t *);
+        typedef uint32_t (*ESP_GetCurrentProcessId_t)(void);
+        typedef int16_t (*ESP_RegisterClassExA_t)(const void *);
+        typedef void   *(*ESP_CreateWindowExA_t)(uint32_t, const char *, const char *, uint32_t,
+                                                 int32_t, int32_t, int32_t, int32_t,
+                                                 void *, void *, void *, void *);
+        typedef int64_t (*ESP_DefWindowProcA_t)(void *, uint32_t, uint64_t, int64_t);
+        typedef int32_t (*ESP_DestroyWindow_t)(void *);
+        typedef int32_t (*ESP_ShowWindow_t)(void *, int32_t);
+        typedef int32_t (*ESP_UpdateWindow_t)(void *);
+        typedef int32_t (*ESP_InvalidateRect_t)(void *, const void *, int32_t);
+        typedef int32_t (*ESP_PeekMessageA_t)(void *, void *, uint32_t, uint32_t, uint32_t);
+        typedef int32_t (*ESP_TranslateMessage_t)(const void *);
+        typedef int64_t (*ESP_DispatchMessageA_t)(const void *);
+        typedef void   *(*ESP_SetCapture_t)(void *);
+        typedef int32_t (*ESP_ReleaseCapture_t)(void);
+        typedef int32_t (*ESP_GetWindowRect_t)(void *, void *);
+        typedef int32_t (*ESP_GetCursorPos_t)(void *);
+        typedef int32_t (*ESP_MoveWindow_t)(void *, int32_t, int32_t, int32_t, int32_t, int32_t);
+        typedef void   *(*ESP_SetCursor_t)(void *);
+        typedef void   *(*ESP_LoadCursorA_t)(void *, const char *);
+        typedef int32_t (*ESP_GetClientRect_t)(void *, void *);
+        typedef void   *(*ESP_BeginPaint_t)(void *, void *);
+        typedef int32_t (*ESP_EndPaint_t)(void *, const void *);
+        typedef void   *(*ESP_GetDC_t)(void *);
+        typedef int32_t (*ESP_ReleaseDC_t)(void *, void *);
+        typedef int32_t (*ESP_FillRect_t)(void *, const void *, void *);
+        typedef int32_t (*ESP_DrawTextW_t)(void *, const uint16_t *, int32_t, void *, uint32_t);
+        typedef int32_t (*ESP_MultiByteToWideChar_t)(uint32_t, uint32_t, const char *, int32_t,
+                                                     uint16_t *, int32_t);
+        typedef void   *(*ESP_CreateSolidBrush_t)(uint32_t);
+        typedef void   *(*ESP_CreatePen_t)(int32_t, int32_t, uint32_t);
+        typedef void   *(*ESP_SelectObject_t)(void *, void *);
+        typedef int32_t (*ESP_DeleteObject_t)(void *);
+        typedef void   *(*ESP_CreateCompatibleDC_t)(void *);
+        typedef void   *(*ESP_CreateCompatibleBitmap_t)(void *, int32_t, int32_t);
+        typedef int32_t (*ESP_BitBlt_t)(void *, int32_t, int32_t, int32_t, int32_t,
+                                        void *, int32_t, int32_t, uint32_t);
+        typedef int32_t (*ESP_DeleteDC_t)(void *);
+        typedef int32_t (*ESP_RoundRect_t)(void *, int32_t, int32_t, int32_t, int32_t,
+                                           int32_t, int32_t);
+        typedef int32_t (*ESP_Ellipse_t)(void *, int32_t, int32_t, int32_t, int32_t);
+        typedef int32_t (*ESP_SetTextColor_t)(void *, uint32_t);
+        typedef int32_t (*ESP_SetBkMode_t)(void *, int32_t);
+    ]]
+
+    local function bind_export(lib, export, typedef_name)
+        local symbol = lib[export]
+        assert(symbol ~= nil, 'missing Win32 export: ' .. export)
+        return ffi.cast(typedef_name, symbol)
+    end
+
+    local user32, gdi32, kernel32 = {}, {}, {}
+    for export, typedef_name in pairs({
+        GetAsyncKeyState = 'ESP_GetAsyncKeyState_t',
+        GetWindowThreadProcessId = 'ESP_GetWindowThreadProcessId_t',
+        RegisterClassExA = 'ESP_RegisterClassExA_t',
+        CreateWindowExA = 'ESP_CreateWindowExA_t',
+        DefWindowProcA = 'ESP_DefWindowProcA_t',
+        DestroyWindow = 'ESP_DestroyWindow_t',
+        ShowWindow = 'ESP_ShowWindow_t',
+        UpdateWindow = 'ESP_UpdateWindow_t',
+        InvalidateRect = 'ESP_InvalidateRect_t',
+        PeekMessageA = 'ESP_PeekMessageA_t',
+        TranslateMessage = 'ESP_TranslateMessage_t',
+        DispatchMessageA = 'ESP_DispatchMessageA_t',
+        SetCapture = 'ESP_SetCapture_t',
+        ReleaseCapture = 'ESP_ReleaseCapture_t',
+        GetWindowRect = 'ESP_GetWindowRect_t',
+        GetCursorPos = 'ESP_GetCursorPos_t',
+        MoveWindow = 'ESP_MoveWindow_t',
+        SetCursor = 'ESP_SetCursor_t',
+        LoadCursorA = 'ESP_LoadCursorA_t',
+        GetClientRect = 'ESP_GetClientRect_t',
+        BeginPaint = 'ESP_BeginPaint_t',
+        EndPaint = 'ESP_EndPaint_t',
+        GetDC = 'ESP_GetDC_t',
+        ReleaseDC = 'ESP_ReleaseDC_t',
+        FillRect = 'ESP_FillRect_t',
+        DrawTextW = 'ESP_DrawTextW_t',
+    }) do
+        user32[export] = bind_export(user32_lib, export, typedef_name)
+    end
+    for export, typedef_name in pairs({
+        CreateSolidBrush = 'ESP_CreateSolidBrush_t',
+        CreatePen = 'ESP_CreatePen_t',
+        SelectObject = 'ESP_SelectObject_t',
+        DeleteObject = 'ESP_DeleteObject_t',
+        CreateCompatibleDC = 'ESP_CreateCompatibleDC_t',
+        CreateCompatibleBitmap = 'ESP_CreateCompatibleBitmap_t',
+        BitBlt = 'ESP_BitBlt_t',
+        DeleteDC = 'ESP_DeleteDC_t',
+        RoundRect = 'ESP_RoundRect_t',
+        Ellipse = 'ESP_Ellipse_t',
+        SetTextColor = 'ESP_SetTextColor_t',
+        SetBkMode = 'ESP_SetBkMode_t',
+    }) do
+        gdi32[export] = bind_export(gdi32_lib, export, typedef_name)
+    end
+    kernel32.GetModuleHandleA = bind_export(kernel32_lib, 'GetModuleHandleA',
+                                            'ESP_GetModuleHandleA_t')
+    kernel32.GetCurrentProcessId = bind_export(kernel32_lib, 'GetCurrentProcessId',
+                                               'ESP_GetCurrentProcessId_t')
+    kernel32.GetLastError = bind_export(kernel32_lib, 'GetLastError',
+                                        'uint32_t (*)(void)')
+    kernel32.MultiByteToWideChar = bind_export(kernel32_lib, 'MultiByteToWideChar',
+                                               'ESP_MultiByteToWideChar_t')
 
     local WNDCLASSEXA = ffi.typeof([[struct {
         uint32_t cbSize; uint32_t style; void *wnd_proc;
