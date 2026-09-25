@@ -28,13 +28,15 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
     source_pairs = [('create_api', 'windows_api.lua'), ('patch', patch_name)]
     if with_panel:
         # Persistence ships with the panel: config_store backs the sliders with a
-        # local file so a committed profile survives a restart.
+        # local file so a committed profile survives a restart. diag_export powers
+        # the Desktop diagnostic pack button (and is also used by the companion bat).
         source_pairs += [('create_panel', 'panel.lua'), ('create_model', 'panel_model.lua'),
-                         ('create_bindings', 'bindings.lua'), ('create_store', 'config_store.lua')]
+                         ('create_bindings', 'bindings.lua'), ('create_store', 'config_store.lua'),
+                         ('create_diag', 'diag_export.lua')]
     source_pairs += [('create_anchors', 'anchor_check.lua'),
                      ('install_loader', 'archive_loader.lua')]
     if not with_panel:
-        module += 'local create_panel, create_model, create_bindings, create_store = nil, nil, nil, nil\n'
+        module += 'local create_panel, create_model, create_bindings, create_store, create_diag = nil, nil, nil, nil, nil\n'
     for variable, filename in source_pairs:
         code = (root / 'src' / filename).read_text(encoding='utf-8')
         for forbidden in ('VirtualProtect', 'FlushInstructionCache', 'CreateRemoteThread', 'LoadLibrary'):
@@ -47,7 +49,7 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
             for key in sorted((overrides or {}).keys()):
                 module += f'patch.{key} = {lua_literal(overrides[key])}\n'
     module += f"install_loader(create_api, patch, {{revision = '{revision}', "
-    module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '}, create_panel, create_model, create_bindings, create_anchors, create_store)\n'
+    module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '}, create_panel, create_model, create_bindings, create_anchors, create_store, create_diag)\n'
     path, output = build / 'mod.wrapper.lua', build / 'mod.ljbc'
     path.write_text(module, encoding='utf-8', newline='\n')
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')

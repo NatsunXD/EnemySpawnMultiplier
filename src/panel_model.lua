@@ -8,9 +8,11 @@ return function()
 
     -- Width fits the full 'EnemySpawnMultiplier v20 by Natsun' title plus the
     -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 560, 440
+    M.CLIENT_W, M.CLIENT_H = 560, 400
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
+    M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
+    M.PATROL_SIZE_STEPS = 19
 
     -- Cooldown controls are a continuous interval in seconds: 2 s at the fast
     -- end, 30 s (native pacing) at the slow end.
@@ -18,14 +20,14 @@ return function()
     M.COOLDOWN_STEPS = 28 -- 1 s grid across 2 .. 30
 
     local DEFAULTS = {
-        budget = 2.0, patrol_count = 2.0, patrol_size = 2.0,
+        budget = 2.0, patrol_count = 2.0, patrol_size = 1.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
     }
 
     local SLIDER_LABELS = {
         {key = 'budget', label = '增援预算'},
         {key = 'patrol_count', label = '巡逻数量'},
-        {key = 'patrol_size', label = '巡逻规模'},
+        {key = 'patrol_size', label = '巡逻规模', min = M.PATROL_SIZE_MIN, max = M.PATROL_SIZE_MAX, steps = M.PATROL_SIZE_STEPS},
         {key = 'encounter_cd', label = '增援 CD', kind = 'cooldown'},
         {key = 'patrol_cd', label = '巡逻 CD', kind = 'cooldown'},
     }
@@ -47,6 +49,7 @@ return function()
         for index, def in ipairs(SLIDER_LABELS) do
             sliders[index] = {
                 key = def.key, label = def.label, kind = def.kind or 'multiplier',
+                min = def.min, max = def.max, steps = def.steps,
                 x = 24, y = 52 + (index - 1) * 42, w = M.CLIENT_W - 48, h = 34,
             }
             local item = sliders[index]
@@ -56,11 +59,12 @@ return function()
         local radios = {}
         for index, def in ipairs(RADIO_LABELS) do
             radios[index] = {key = 'preset', value = def.value, label = def.label,
-                             x = 28, y = 280 + (index - 1) * 28, w = M.CLIENT_W - 56, h = 24}
+                             x = 28, y = 240 + (index - 1) * 28, w = M.CLIENT_W - 56, h = 24}
         end
         local buttons = {
-            {id = 'apply', label = '应用', x = 150, y = 372, w = 92, h = 32, accent = true},
-            {id = 'reset', label = '重置', x = 250, y = 372, w = 92, h = 32},
+            {id = 'apply', label = '应用', x = 72, y = 332, w = 92, h = 32, accent = true},
+            {id = 'reset', label = '重置', x = 180, y = 332, w = 92, h = 32},
+            {id = 'export', label = '导出游戏日志', x = 288, y = 332, w = 148, h = 32},
         }
         return {sliders = sliders, radios = radios, buttons = buttons}
     end
@@ -90,7 +94,8 @@ return function()
         if is_cooldown(item) then
             return (value - M.COOLDOWN_FAST) / (M.COOLDOWN_SLOW - M.COOLDOWN_FAST)
         end
-        return (value - M.SLIDER_MIN) / (M.SLIDER_MAX - M.SLIDER_MIN)
+        local min, max = item.min or M.SLIDER_MIN, item.max or M.SLIDER_MAX
+        return (value - min) / (max - min)
     end
 
     function M.set_slider(item, x)
@@ -99,7 +104,8 @@ return function()
         if is_cooldown(item) then
             M.pending[item.key] = M.cooldown_to_value(ratio * M.COOLDOWN_STEPS)
         else
-            M.pending[item.key] = M.slider_to_value(ratio * M.SLIDER_STEPS)
+            local min, max, steps = item.min or M.SLIDER_MIN, item.max or M.SLIDER_MAX, item.steps or M.SLIDER_STEPS
+            M.pending[item.key] = math.floor((min + math.floor(ratio * steps + 0.5) * (max - min) / steps) * 10 + 0.5) / 10
         end
         return M.pending[item.key]
     end
@@ -135,9 +141,6 @@ return function()
         M.pending.patrol_count = M.slider_to_value(math.floor(
             (math.min(math.max(patch.modifier_patrol_count, M.SLIDER_MIN), M.SLIDER_MAX) - M.SLIDER_MIN)
             / (M.SLIDER_MAX - M.SLIDER_MIN) * M.SLIDER_STEPS + 0.5))
-        M.pending.patrol_size = M.slider_to_value(math.floor(
-            (math.min(math.max(patch.modifier_travelers_max_unit, M.SLIDER_MIN), M.SLIDER_MAX) - M.SLIDER_MIN)
-            / (M.SLIDER_MAX - M.SLIDER_MIN) * M.SLIDER_STEPS + 0.5))
         -- A disabled deadline clamp means the slow/native end, regardless of any
         -- stale interval value left behind by a previous configuration.
         if patch.encounter_deadline_enabled then
@@ -148,6 +151,10 @@ return function()
         else
             M.pending.encounter_cd = M.COOLDOWN_SLOW
         end
+        local size_steps = (math.min(math.max(patch.modifier_travelers_max_unit, M.PATROL_SIZE_MIN), M.PATROL_SIZE_MAX) - M.PATROL_SIZE_MIN)
+            / (M.PATROL_SIZE_MAX - M.PATROL_SIZE_MIN) * M.PATROL_SIZE_STEPS
+        M.pending.patrol_size = math.floor((M.PATROL_SIZE_MIN + math.floor(size_steps + 0.5)
+            * (M.PATROL_SIZE_MAX - M.PATROL_SIZE_MIN) / M.PATROL_SIZE_STEPS) * 10 + 0.5) / 10
         -- The patrol curve has its own fastest-end scale, so decode it with the
         -- patrol rate rather than the reinforcement rate.
         local patrol_rate = patch.patrol_cooldown_fast_rate or patch.cooldown_fast_rate
@@ -189,7 +196,13 @@ return function()
         end
         local changed = false
         local snaps = {
-            budget = snap_multiplier, patrol_count = snap_multiplier, patrol_size = snap_multiplier,
+            budget = snap_multiplier, patrol_count = snap_multiplier,
+            patrol_size = function(value)
+                if type(value) ~= 'number' or value ~= value then return nil end
+                local steps = (value - M.PATROL_SIZE_MIN) / (M.PATROL_SIZE_MAX - M.PATROL_SIZE_MIN) * M.PATROL_SIZE_STEPS
+                local snapped = M.PATROL_SIZE_MIN + math.floor(steps + 0.5) * (M.PATROL_SIZE_MAX - M.PATROL_SIZE_MIN) / M.PATROL_SIZE_STEPS
+                return math.floor(snapped * 10 + 0.5) / 10
+            end,
             encounter_cd = snap_cooldown, patrol_cd = snap_cooldown,
         }
         for key, snap in pairs(snaps) do

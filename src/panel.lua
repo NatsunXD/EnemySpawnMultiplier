@@ -24,6 +24,8 @@ return function(create_model, patch, callbacks)
     -- on Apply and restored on the next game launch; when absent (as in the
     -- smaller test harnesses) the panel behaves exactly as before.
     local store = callbacks.store
+    -- Optional diagnostic pack exporter (Desktop dump). Best-effort only.
+    local export_diag = callbacks.export_diag
     local TITLE = callbacks.title or 'EnemySpawnMultiplier'
     local ffi = require('ffi')
     local bit = require('bit')
@@ -216,8 +218,8 @@ return function(create_model, patch, callbacks)
         if applied then
             local p = model.pending
             emit('config_restored', string.format(
-                'budget=%.1f count=%.1f size=%.1f enc_cd=%.0fs patrol_cd=%.0fs preset=%s',
-                p.budget, p.patrol_count, p.patrol_size, p.encounter_cd, p.patrol_cd, p.preset))
+                'budget=%.1f count=%.1f enc_cd=%.0fs patrol_cd=%.0fs preset=%s',
+                p.budget, p.patrol_count, p.encounter_cd, p.patrol_cd, p.preset))
         else
             -- A stored profile this build rejects must not leave the editor
             -- showing values that were never applied; fall back to the live one.
@@ -244,10 +246,30 @@ return function(create_model, patch, callbacks)
         panel.status, panel.status_until = '已应用', os.clock() + 1.5
         local p = model.pending
         emit('panel_applied', string.format(
-            'budget=%.1f count=%.1f size=%.1f enc_cd=%.0fs patrol_cd=%.0fs preset=%s',
-            p.budget, p.patrol_count, p.patrol_size, p.encounter_cd, p.patrol_cd, p.preset))
+            'budget=%.1f count=%.1f enc_cd=%.0fs patrol_cd=%.0fs preset=%s',
+            p.budget, p.patrol_count, p.encounter_cd, p.patrol_cd, p.preset))
         -- Persist exactly what was just committed so the next launch restores it.
         save_settings()
+        return true
+    end
+
+    function panel.export()
+        if type(export_diag) ~= 'function' then
+            panel.status, panel.status_until = '导出不可用', os.clock() + 3.0
+            emit('bb_export_unavailable', '')
+            return false
+        end
+        local called, folder, err = pcall(export_diag)
+        if not called then
+            panel.status, panel.status_until = '导出失败', os.clock() + 3.0
+            emit('bb_export_error', tostring(folder))
+            return false
+        end
+        if not folder then
+            panel.status, panel.status_until = '导出失败：' .. tostring(err), os.clock() + 3.0
+            return false
+        end
+        panel.status, panel.status_until = '已导出到桌面', os.clock() + 3.0
         return true
     end
 
@@ -331,7 +353,7 @@ return function(create_model, patch, callbacks)
             end
         end
 
-        draw_text(memory, '模板预设', 24, 256, 200, 20, C_DIM)
+        draw_text(memory, '模板预设', 24, 216, 200, 20, C_DIM)
         for _, item in ipairs(widgets.radios) do
             local selected = model.pending[item.key] == item.value
             local cx, cy = item.x + 8, item.y + item.h / 2
@@ -367,7 +389,7 @@ return function(create_model, patch, callbacks)
         if panel.status ~= '' and os.clock() < panel.status_until then
             footer, footer_color = panel.status, C_OK
         end
-        draw_text(memory, footer, 24, 410, CLIENT_W - 48, 24, footer_color)
+        draw_text(memory, footer, 24, 370, CLIENT_W - 48, 24, footer_color)
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)
         gdi32.SelectObject(memory, old_bitmap)
@@ -391,6 +413,8 @@ return function(create_model, patch, callbacks)
                 panel.apply()
             elseif item.id == 'reset' then
                 model.reset()
+            elseif item.id == 'export' then
+                panel.export()
             end
             user32.InvalidateRect(panel.window, nil, 0)
         elseif kind == 'title' then

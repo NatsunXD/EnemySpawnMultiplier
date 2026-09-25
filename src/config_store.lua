@@ -29,7 +29,7 @@ return function(options)
     local LIMITS = {
         budget = MULTIPLIER,
         patrol_count = MULTIPLIER,
-        patrol_size = MULTIPLIER,
+        patrol_size = {min = 0.1, max = 2.0},
         encounter_cd = COOLDOWN,
         patrol_cd = COOLDOWN,
     }

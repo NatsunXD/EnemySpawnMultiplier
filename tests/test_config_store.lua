@@ -16,12 +16,18 @@ local profile = {budget = 4.5, patrol_count = 3.0, patrol_size = 0.5,
                  encounter_cd = 12.0, patrol_cd = 2.0, preset = 'light_medium'}
 local text = store.encode(profile)
 assert(type(text) == 'string' and text:sub(1, 8) == 'version=')
+assert(text:find('patrol_size=0.5', 1, true), 'patrol_size must be persisted')
 local decoded, reason = store.decode(text)
 assert(decoded, tostring(reason))
 assert(decoded.budget == 4.5 and decoded.patrol_count == 3.0 and decoded.patrol_size == 0.5)
 assert(decoded.encounter_cd == 12.0 and decoded.patrol_cd == 2.0)
 assert(decoded.preset == 'light_medium')
 pass('a profile survives an encode/decode round trip')
+
+-- Patrol size remains range checked when loaded from disk.
+local legacy = store.decode('version=1\nbudget=2.0\npatrol_count=2.0\npatrol_size=3.0\npreset=heavy\n')
+assert(legacy and legacy.budget == 2.0 and legacy.patrol_size == 2.0)
+pass('patrol_size in cfg is range checked')
 
 -- The panel path is only one line of text, so the save must go through the real
 -- file system and read back byte-for-byte.

@@ -53,6 +53,7 @@ local contents = file:read('*a'); file:close()
 assert(contents:find('budget=4.5', 1, true))
 assert(contents:find('encounter_cd=12', 1, true))
 assert(contents:find('preset=light_medium', 1, true))
+assert(contents:find('patrol_size=0.5', 1, true))
 pass('pressing Apply commits the profile to the patch and to disk')
 
 -- Simulate a restart: the patch comes back on its shipped defaults and a fresh
