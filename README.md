@@ -1,77 +1,58 @@
-# Enemy Spawn Multiplier
+﻿# Enemy Spawn Multiplier
 
-## 中文说明
+## 涓枃璇存槑
 
-目前还不是很完善，主要是自己跟朋友一起玩嫌怪太少了所以用AI来搓了一个。
+鐩墠杩樹笉鏄緢瀹屽杽锛屼富瑕佹槸鑷繁璺熸湅鍙嬩竴璧风帺瀚屾€お灏戜簡鎵€浠ョ敤AI鏉ユ悡浜嗕竴涓€?
+姣曠珶淇敼浜嗘父鎴忓埛鎬浉鍏崇殑鏈哄埗锛屾墍浠ユ渶濂芥槸鑷繁鐜╂垨鑰呭拰鏈嬪弸涓€璧风帺鍝︼紝涓嶈鍘绘伓鎼炶矾浜猴紒锛侊紒
 
-毕竟修改了游戏刷怪相关的机制，所以最好是自己玩或者和朋友一起玩哦，不要去恶搞路人！！！
 
+### 鐗堟湰
 
-### 版本
-
-三个版本使用同一个资源 ID，只能安装其中一个，取向不同：
-
-- `Native Composition`：整体提高刷怪强度，保持游戏原生的刷怪组合权重。
-- `Light-Medium Bias`：整体提高刷怪强度，并让刷怪更倾向于中轻甲单位。
-- `Fast Cadence`：这个版本会削弱拉烟效果，把重心从"拉烟增强"移到"巡逻队激增"。敌人增援的冷却明显缩短；巡逻队出现得更频繁、数量更多、规模更大。
-
-同时经多人测试反馈，增强拉烟所带来的难度提升非常有限，因此后续只会主要维护`Fast Cadence`这个分支
+鐩墠鍙淮鎶ゅ甫闈㈡澘鐨?Panel 鐗堟湰锛?
+- Panel 鐗堟湰閫氳繃 F8 鎵撳紑閰嶇疆闈㈡澘锛屾敮鎸佸鎻撮绠椼€佸贰閫绘暟閲忋€佸贰閫昏妯″拰鍐峰嵈璋冩暣锛屽苟甯︽湁璇︾粏鏃ュ織涓庤瘖鏂寘瀵煎嚭鍔熻兘銆?
+鍚屾椂缁忓浜烘祴璇曞弽棣堬紝澧炲己鎷夌儫鎵€甯︽潵鐨勯毦搴︽彁鍗囬潪甯告湁闄愶紝鍥犳鍚庣画鍙細涓昏缁存姢`Fast Cadence`杩欎釜鍒嗘敮
 
 
 
-### 安装
+### 瀹夎
 
-1. 关闭游戏。
-2. 安装并启用原作者的 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases) 并设置为最高优先级。
-3. 在 HDArsenal 或 HD2MM 中导入 releases 页面里的任意一个包，三选一。
-4. 重新部署并重启游戏。
+1. 鍏抽棴娓告垙銆?2. 瀹夎骞跺惎鐢ㄥ師浣滆€呯殑 [Bingus Shared Loader v15 鎴栨洿鏂扮増鏈琞(https://github.com/CowboyBingus/BingusSharedLoader/releases) 骞惰缃负鏈€楂樹紭鍏堢骇銆?3. 鍦?HDArsenal 鎴?HD2MM 涓鍏?releases 椤甸潰閲岀殑浠绘剰涓€涓寘锛屼笁閫変竴銆?4. 閲嶆柊閮ㄧ讲骞堕噸鍚父鎴忋€?
+妯＄粍浼氭妸璇婃柇淇℃伅杩藉姞鍐欏叆 `%LOCALAPPDATA%/EnemySpawnMultiplier.log`銆?鎻愰棶鏃惰闄勫甫褰撳眬log鏂囦欢
 
-模组会把诊断信息追加写入 `%LOCALAPPDATA%/EnemySpawnMultiplier.log`。
-提问时请附带当局log文件
+### 閰嶇疆淇濆瓨锛堥潰鏉跨増锛?
+甯︾晫闈㈢殑 `Panel` 鐗堟湰鎸?F8 鎵撳紑闈㈡澘锛岃皟鏁村弬鏁板悗鐐光€滃簲鐢ㄢ€濓紝褰撳墠閰嶇疆浼氫繚瀛樺埌
+`%LOCALAPPDATA%/EnemySpawnMultiplier.cfg`锛涗笅娆″惎鍔ㄦ父鎴忔椂浼氳嚜鍔ㄨ鍙栧苟鐢熸晥锛?鏃犻渶鍐嶆鎵嬪姩璋冩暣銆傞厤缃枃浠舵崯鍧忔垨缂哄け鏃朵細鍥為€€鍒板唴缃粯璁ゅ€硷紝涓嶅奖鍝嶆甯告父鎴忋€?
+### 璇婃柇鍖咃紙榛戝專瀛?/ Panel Blackbox锛?
+榛戝專瀛愰粯璁ゅ紑鍚細鏃ュ織浼氶澶栬褰曠姸鎬佸垏鎹€乣resource_clone` 浜嬩欢銆佸啓澶辫触锛屼互鍙?updater 鑰楁椂锛坄upd_ms`锛夈€?
+瀵煎嚭鏂瑰紡锛堜簩閫変竴鍗冲彲锛夛細
 
-### 配置保存（面板版）
+1. **娓告垙鍐?*锛欶8 鎵撳紑闈㈡澘 鈫?鐐广€屽鍑烘父鎴忔棩蹇椼€嶁啋 妗岄潰鍑虹幇 `ESM-diag-鏃堕棿鎴砢 鏂囦欢澶癸紙鏁翠唤 log/cfg + meta锛屼笉瑁佸壀锛夈€?2. **宕╁悗**锛氬弻鍑讳粨搴撻噷鐨?`tools/瀵煎嚭ESM璇婃柇鍖?bat`锛?*涓嶉殢妯＄粍 zip 瀹夎锛屽彲浠ュ湪缇ら噷瑕?*锛夆啋 妗岄潰鍑虹幇鏃ュ織鏂囦欢澶广€傞殢鍚庢妸浣犵殑鏃ュ織鏂囦欢澶规墦鍖呮垚鍘嬬缉鍖呭弽棣堢粰寮€鍙戣€呫€?
+鑱旀満宕╂簝鏃惰**姣忎汉鍚勫涓€浠?*锛堜富鏈洪『绉诲悗姣忎釜浜虹殑鏃ュ織閮芥湁鐢級銆?
+## 馃 鍙備笌璐＄尞
 
-带界面的 `Panel` 版本按 F8 打开面板，调整参数后点“应用”，当前配置会保存到
-`%LOCALAPPDATA%/EnemySpawnMultiplier.cfg`；下次启动游戏时会自动读取并生效，
-无需再次手动调整。配置文件损坏或缺失时会回退到内置默认值，不影响正常游戏。
+娆㈣繋浠讳綍褰㈠紡鐨勮础鐚紒浠ヤ笅鏄爣鍑嗚础鐚祦绋嬶細
 
-### 诊断包（黑匣子 / Panel Blackbox）
-
-黑匣子默认开启：日志会额外记录状态切换、`resource_clone` 事件、写失败，以及 updater 耗时（`upd_ms`）。
-
-导出方式（二选一即可）：
-
-1. **游戏内**：F8 打开面板 → 点「导出游戏日志」→ 桌面出现 `ESM-diag-时间戳` 文件夹（整份 log/cfg + meta，不裁剪）。
-2. **崩后**：双击仓库里的 `tools/导出ESM诊断包.bat`（**不随模组 zip 安装，可以在群里要**）→ 桌面出现日志文件夹。随后把你的日志文件夹打包成压缩包反馈给开发者。
-
-联机崩溃时请**每人各导一份**（主机顺移后每个人的日志都有用）。
-
-## 🤝 参与贡献
-
-欢迎任何形式的贡献！以下是标准贡献流程：
-
-1. **Fork 仓库** - 点击右上角 Fork 按钮创建您的副本
-2. **创建分支** - 基于开发分支创建特性分支：
+1. **Fork 浠撳簱** - 鐐瑰嚮鍙充笂瑙?Fork 鎸夐挳鍒涘缓鎮ㄧ殑鍓湰
+2. **鍒涘缓鍒嗘敮** - 鍩轰簬寮€鍙戝垎鏀垱寤虹壒鎬у垎鏀細
    ```bash
    git checkout -b feature/your-feature-name
    ```
-3. **提交修改** - 编写清晰的提交信息：
+3. **鎻愪氦淇敼** - 缂栧啓娓呮櫚鐨勬彁浜や俊鎭細
    ```bash
-   git commit -m "feat: 添加新功能" -m "详细描述..."
+   git commit -m "feat: 娣诲姞鏂板姛鑳? -m "璇︾粏鎻忚堪..."
    ```
-4. **推送更改** - 将分支推送到您的远程仓库：
-   ```bash
+4. **鎺ㄩ€佹洿鏀?* - 灏嗗垎鏀帹閫佸埌鎮ㄧ殑杩滅▼浠撳簱锛?   ```bash
    git push origin feature/your-feature-name
    ```
-5. **发起 PR** - 在 GitHub 上创建 Pull Request 到原仓库的 `main` 分支
+5. **鍙戣捣 PR** - 鍦?GitHub 涓婂垱寤?Pull Request 鍒板師浠撳簱鐨?`main` 鍒嗘敮
 
 
-[技术说明](docs/TECHNICAL.md) | [构建说明](CONTRIBUTING.md) | [安装说明](INSTALL.txt)
+[鎶€鏈鏄嶿(docs/TECHNICAL.md) | [鏋勫缓璇存槑](CONTRIBUTING.md) | [瀹夎璇存槑](INSTALL.txt)
 
 <details>
 <summary>English</summary>
 
-Three mutually exclusive packages share one resource ID, so install exactly one.
+Only the Panel package is maintained. Install the single published Panel package.
 
 - `Native Composition` raises overall spawn pressure and keeps the game's native Encounter composition weights.
 - `Light-Medium Bias` raises overall spawn pressure and steers Encounter composition toward lighter and medium units.
@@ -79,7 +60,7 @@ Three mutually exclusive packages share one resource ID, so install exactly one.
 
 `Fast Cadence` deliberately opposes the other two: it aims for a steady, rapid stream of units instead of large individual waves.
 
-Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases), then install exactly one of the packages published on the releases page. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
+Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases), then install the Panel package published on the releases page. Loader v15 discovers the declared entry automatically; no registry edit or custom loader fork is required.
 
 The mod changes writable private data only and does not modify executable pages. Native population gates, position checks, template availability and queue processing remain active. Diagnostics are appended to `%LOCALAPPDATA%/EnemySpawnMultiplier.log`.
 
@@ -88,3 +69,4 @@ The panel build (F8) saves the committed profile to `%LOCALAPPDATA%/EnemySpawnMu
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt)
 
 </details>
+

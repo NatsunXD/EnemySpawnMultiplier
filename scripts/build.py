@@ -167,12 +167,11 @@ def inspect_archive(data):
 
 def main():
     if len(sys.argv) == 1:
-        for key in VARIANTS:
-            print(run([sys.executable, Path(__file__), key]).strip())
-        return
-    if len(sys.argv) != 2 or sys.argv[1] not in VARIANTS:
-        raise SystemExit('Usage: build.py [base|light-medium|fast-cadence|panel|preview-patrol-2x-3x]')
-    key = sys.argv[1]
+        key = 'panel'
+    else:
+        key = sys.argv[1]
+    if key != 'panel':
+        raise SystemExit('Only the panel variant is maintained; use: build.py panel')
     variant = VARIANTS[key]
     revision = variant['revision']
     settings = {
