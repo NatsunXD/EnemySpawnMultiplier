@@ -8,16 +8,15 @@ return function()
 
     -- Width fits the full 'EnemySpawnMultiplier v21 by Natsun' title plus the
     -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 560, 500
+    M.CLIENT_W, M.CLIENT_H = 580, 500
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
     M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
     M.PATROL_SIZE_STEPS = 19
 
-    -- Above these values the spawn load gets heavy enough that players have
-    -- reported crashes. The panel only warns; nothing is clamped, so a player who
-    -- wants the load can still set it.
-    M.PATROL_COUNT_RISK = 1.5
+    -- Above 1.0x the patrol pair is considered high pressure. The panel only
+    -- warns; nothing is clamped, so a player who wants the load can still set it.
+    M.PATROL_COUNT_RISK = 1.0
     M.PATROL_SIZE_RISK = 1.0
 
     -- Cooldown controls are a continuous interval in seconds: 2 s at the fast
@@ -40,7 +39,7 @@ return function()
     }
     -- Simple on/off rows rendered as checkboxes, below the sliders.
     local CHECKBOX_LABELS = {
-        {key = 'fast_corpse', label = '尸体快速消失'},
+        {key = 'fast_corpse', label = '尸体快速消失（保留布娃娃）'},
     }
 
     local RADIO_LABELS = {
@@ -65,7 +64,7 @@ return function()
                 x = 24, y = 52 + (index - 1) * 42, w = M.CLIENT_W - 48, h = 34,
             }
             local item = sliders[index]
-            item.track_x, item.track_w = item.x + 126, item.w - 126 - 78
+            item.track_x, item.track_w = item.x + 126, item.w - 126 - 88
             item.track_y = item.y + 16
         end
         -- Checkbox rows sit directly under the slider block; the preset block

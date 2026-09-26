@@ -212,17 +212,17 @@ assert(model.pending.fast_corpse == true)
 pass('panel reset restores the documented defaults')
 
 -- Risk thresholds drive the red value text and the corner warning. The boundary
--- is strict "greater than", so exactly 1.5 / 1.0 is still safe.
+-- is strict "greater than", so exactly 1.0 / 1.0 is still safe.
 model.reset()
-model.pending.patrol_count, model.pending.patrol_size = 1.5, 1.0
-assert(model.at_risk({key = 'patrol_count'}) == false, 'exactly 1.5 must be safe')
+model.pending.patrol_count, model.pending.patrol_size = 1.0, 1.0
+assert(model.at_risk({key = 'patrol_count'}) == false, 'exactly 1.0 must be safe')
 assert(model.at_risk({key = 'patrol_size'}) == false, 'exactly 1.0 must be safe')
 assert(model.pressure_warning() == false)
 
-model.pending.patrol_count = 1.6
-assert(model.at_risk({key = 'patrol_count'}) == true, 'above 1.5 must warn')
+model.pending.patrol_count = 1.1
+assert(model.at_risk({key = 'patrol_count'}) == true, 'above 1.0 must warn')
 assert(model.pressure_warning() == true)
-model.pending.patrol_count = 1.5
+model.pending.patrol_count = 1.0
 model.pending.patrol_size = 1.1
 assert(model.at_risk({key = 'patrol_count'}) == false)
 assert(model.at_risk({key = 'patrol_size'}) == true, 'above 1.0 must warn')

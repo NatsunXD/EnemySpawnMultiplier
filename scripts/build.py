@@ -73,7 +73,7 @@ VARIANTS = {
         'public_version': 'v21-blackbox',
         'name': 'Enemy Spawn Multiplier Panel Blackbox',
         'panel': True,
-        'description': 'Panel build with a light always-on blackbox for crash triage. Press F8 for the configuration overlay; use Export game log to dump the live log/cfg onto the Desktop. Starts from 2x budget, 1x patrol count, 1x patrol size adjustable from 0.1x to 2x, both cooldowns at the fast end (2 s) and the heavy-focus preset. Logs updater cost and resource-clone events. Changes writable private data only. Requires the official Bingus Shared Loader v15 or newer.',
+        'description': 'Panel build with a light always-on blackbox for crash triage. Press F8 for the configuration overlay; use Export game log to dump the live log/cfg onto the Desktop. Starts from 2x budget, 1x patrol count, 1x patrol size adjustable from 0.1x to 2x, both cooldowns at the fast end (2 s) and the heavy-focus preset. Skips spawn writes (and fast corpse decay) while matchmaking privacy is Public, latched for the rest of that mission. Fast corpse decay defaults on at ~5 s while preserving ragdoll. Patrol count/size warn above 1.0x. Logs updater cost and resource-clone events. Changes writable private data only. Requires the official Bingus Shared Loader v15 or newer.',
         'template_bias': True,
         'overrides': {
             'budget_multiplier': 2.0,

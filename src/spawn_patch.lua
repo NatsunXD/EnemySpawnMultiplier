@@ -347,6 +347,8 @@ local function in_mission(api, game)
     local mode_bytes = api.read(mode, 12)
     return mode_bytes ~= nil and u32(mode_bytes, 8) ~= 0
 end
+-- Read-only mission probe for the loader privacy latch (no spawn writes).
+patch.in_mission = in_mission
 -- Read FactionType straight out of the active config row. Returns nil when the
 -- value is not a recognised faction, so the caller can fall back.
 local function faction_from_config(api, address)
