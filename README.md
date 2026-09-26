@@ -14,6 +14,7 @@ Panel 版本按 F8 打开配置面板，可调整增援预算、巡逻数量、�
 2. 安装并启用官方 [Bingus Shared Loader v15 或更新版本](https://github.com/CowboyBingus/BingusSharedLoader/releases)，并设置为最高优先级。
 3. 从 releases 页面安装唯一的 Panel 模组包。
 4. 重新启动游戏。
+5. 若安装了牛仔哥的`ModBindingsMenu` MOD，则还需要在 游戏设置-按键绑定-MODS 中为`Toggle Menu`设置一个按键
 
 ### 配置保存
 
