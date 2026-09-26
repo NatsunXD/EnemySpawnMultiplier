@@ -33,23 +33,40 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
         source_pairs += [('create_panel', 'panel.lua'), ('create_model', 'panel_model.lua'),
                          ('create_bindings', 'bindings.lua'), ('create_store', 'config_store.lua'),
                          ('create_diag', 'diag_export.lua')]
+        # Fast corpse decay ships with the panel, which carries its switch.
+        source_pairs += [('corpse_data', 'corpse_data.lua'),
+                         ('corpse_decayer_data', 'corpse_decayer_data.lua'),
+                         ('create_corpse', 'corpse_clear.lua')]
     source_pairs += [('create_anchors', 'anchor_check.lua'),
                      ('install_loader', 'archive_loader.lua')]
     if not with_panel:
         module += 'local create_panel, create_model, create_bindings, create_store, create_diag = nil, nil, nil, nil, nil\n'
+        module += 'local corpse_data, corpse_decayer_data, create_corpse = nil, nil, nil\n'
     for variable, filename in source_pairs:
         code = (root / 'src' / filename).read_text(encoding='utf-8')
-        for forbidden in ('VirtualProtect', 'FlushInstructionCache', 'CreateRemoteThread', 'LoadLibrary'):
-            if forbidden in code:
-                raise ValueError(f'Unsupported native modification API in {filename}: {forbidden}')
+        # VirtualProtect is allowed only in the memory-API module, which uses it
+        # to toggle MEM_PRIVATE, non-executable data pages for the corpse-decay
+        # snapshot and always restores the previous protection. Every other
+        # native-modification API stays banned everywhere, and VirtualProtect
+        # stays banned in every other source file.
+        forbidden = ['FlushInstructionCache', 'CreateRemoteThread', 'LoadLibrary']
+        if filename != 'windows_api.lua':
+            forbidden.append('VirtualProtect')
+        for banned in forbidden:
+            if banned in code:
+                raise ValueError(f'Unsupported native modification API in {filename}: {banned}')
         module += f'local {variable} = (function()\n{code}\nend)()\n'
         if variable == 'patch':
             if template_bias:
                 module += 'patch.template_bias_enabled = true\n'
             for key in sorted((overrides or {}).keys()):
                 module += f'patch.{key} = {lua_literal(overrides[key])}\n'
+    module += ("local create_corpse_bound = function(api)\n"
+               "    if not create_corpse or not corpse_data then return nil, 'corpse module absent' end\n"
+               "    return create_corpse(api, corpse_data, corpse_decayer_data)\n"
+               "end\n")
     module += f"install_loader(create_api, patch, {{revision = '{revision}', "
-    module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '}, create_panel, create_model, create_bindings, create_anchors, create_store, create_diag)\n'
+    module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'" + '}, create_panel, create_model, create_bindings, create_anchors, create_store, create_diag, create_corpse_bound)\n'
     path, output = build / 'mod.wrapper.lua', build / 'mod.ljbc'
     path.write_text(module, encoding='utf-8', newline='\n')
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')

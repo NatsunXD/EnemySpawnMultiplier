@@ -46,6 +46,7 @@ pass('first launch opens on the live profile when no config file exists')
 panel.model.pending.budget, panel.model.pending.patrol_count, panel.model.pending.patrol_size = 4.5, 3.0, 0.5
 panel.model.pending.encounter_cd, panel.model.pending.patrol_cd = 12.0, 2.0
 panel.model.pending.preset = 'light_medium'
+panel.model.pending.fast_corpse = false
 assert(panel.apply() == true, 'apply failed')
 assert(approx(patch.budget_multiplier, 4.5))
 local file = assert(io.open(config_path, 'r'), 'config file was not written')
@@ -54,6 +55,7 @@ assert(contents:find('budget=4.5', 1, true))
 assert(contents:find('encounter_cd=12', 1, true))
 assert(contents:find('preset=light_medium', 1, true))
 assert(contents:find('patrol_size=0.5', 1, true))
+assert(contents:find('fast_corpse=false', 1, true))
 pass('pressing Apply commits the profile to the patch and to disk')
 
 -- Simulate a restart: the patch comes back on its shipped defaults and a fresh
@@ -69,6 +71,8 @@ assert(approx(patch.modifier_patrol_count, 3.0), 'patrol count was not restored'
 assert(approx(patch.modifier_travelers_max_unit, 0.5), 'patrol size was not restored')
 assert(approx(restarted.model.pending.budget, 4.5))
 assert(restarted.model.pending.preset == 'light_medium')
+assert(restarted.model.pending.fast_corpse == false)
+assert(patch.fast_corpse == false)
 pass('a later launch restores the saved profile before the first updater pass')
 
 -- A corrupt file must degrade to the live profile rather than raising or

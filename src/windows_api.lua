@@ -13,6 +13,7 @@ return function()
             uint32_t state; uint32_t protection; uint32_t type;
         } HsuMemoryRegion;
         size_t VirtualQuery(const void *address, void *region, size_t size);
+        int VirtualProtect(void *address, size_t size, uint32_t new_protect, uint32_t *old_protect);
         void *VirtualAlloc(void *address, size_t size, uint32_t type, uint32_t protect);
         void *CreateFileW(const uint16_t *path, uint32_t access, uint32_t share, void *security,
                           uint32_t disposition, uint32_t flags, void *template_file);
@@ -32,6 +33,10 @@ return function()
     -- opaque buffer when declaring first so another mod's equivalent struct is
     -- accepted. Cast our own call as well for a typed declaration loaded first.
     local query_region = ffi.cast('size_t (*)(const void *, void *, size_t)', kernel.VirtualQuery)
+    -- Used only to make a MEM_PRIVATE, non-executable data page briefly writable
+    -- so the decay record can be updated. The previous protection is always
+    -- restored immediately; no executable or mapped page is ever touched.
+    local protect_region = ffi.cast('int32_t (*)(void *, size_t, uint32_t, uint32_t *)', kernel.VirtualProtect)
     local process = kernel.GetCurrentProcess()
     local api = {}
 
@@ -43,7 +48,8 @@ return function()
 
     function api.read(address, size)
         local buffer, count = ffi.new('uint8_t[?]', size), ffi.new('size_t[1]')
-        if kernel.ReadProcessMemory(process, address, buffer, size, count) == 0 or count[0] ~= size then
+        local pointer = ffi.cast('const void *', address)
+        if kernel.ReadProcessMemory(process, pointer, buffer, size, count) == 0 or count[0] ~= size then
             return nil
         end
         return ffi.string(buffer, size)
@@ -52,7 +58,8 @@ return function()
     function api.write(address, bytes)
         if not api.writable_data(address, #bytes) then return false end
         local count = ffi.new('size_t[1]')
-        return kernel.WriteProcessMemory(process, address, bytes, #bytes, count) ~= 0 and count[0] == #bytes
+        local pointer = ffi.cast('void *', address)
+        return kernel.WriteProcessMemory(process, pointer, bytes, #bytes, count) ~= 0 and count[0] == #bytes
     end
 
     function api.pointer(bytes, offset)
@@ -94,6 +101,127 @@ return function()
             cursor, remaining = cursor + count, remaining - count
         end
         return true
+    end
+
+    -- Corpse-decay write surface.
+    --
+    -- The spawn patch insists on exactly PAGE_READWRITE (0x04) MEM_PRIVATE data,
+    -- which is right for the live director/config rows it edits. The generated
+    -- entity snapshot is different: the game decrypts generated_entities into a
+    -- MEM_PRIVATE allocation and leaves it PAGE_READONLY (0x02) or
+    -- PAGE_WRITECOPY (0x08). The live test showed exactly that -- a private
+    -- header whose every record came back not_writable -- so the strict check
+    -- rejected the whole table and the feature silently did nothing.
+    --
+    -- This path only accepts MEM_PRIVATE, committed, non-executable data pages.
+    -- When the page is not already writable it flips the record to
+    -- PAGE_READWRITE, performs the write, and restores the original protection.
+    local DECAY_PROT_READONLY  = 0x02
+    local DECAY_PROT_READWRITE = 0x04
+    local DECAY_PROT_WRITECOPY = 0x08
+    local decay_last_protection = 0
+    local decay_protect_calls = 0
+
+    local function decay_region(address)
+        local region = ffi.new('HsuMemoryRegion[1]')
+        local pointer = ffi.cast('const void *', address)
+        if query_region(pointer, region, ffi.sizeof(region[0])) ~= ffi.sizeof(region[0]) then
+            return nil
+        end
+        if region[0].state ~= 0x1000 or region[0].type ~= 0x20000 then return nil end
+        local prot = tonumber(region[0].protection)
+        -- PAGE_GUARD / PAGE_NOCACHE and the execute combinations are never
+        -- accepted; only plain read-only/writecopy/readwrite data pages are.
+        if prot ~= DECAY_PROT_READONLY and prot ~= DECAY_PROT_READWRITE
+            and prot ~= DECAY_PROT_WRITECOPY then
+            return nil
+        end
+        local available = tonumber(region[0].size) - api.distance(address, region[0].base)
+        if available <= 0 then return nil end
+        return region[0], prot, available
+    end
+
+    function api.decay_protection(address, size)
+        local _, prot, available = decay_region(address)
+        if not prot then return nil end
+        if size and size > available then return nil end
+        return prot
+    end
+
+    function api.writable_decay(address, size)
+        if not size or size <= 0 then return false end
+        local remaining = size
+        while remaining > 0 do
+            local _, prot, available = decay_region(address)
+            if not prot then return false end
+            local count = math.min(available, remaining)
+            address, remaining = address + count, remaining - count
+        end
+        return true
+    end
+
+    function api.write_decay(address, bytes)
+        if not api.writable_decay(address, #bytes) then return false end
+        local pointer = ffi.cast('void *', address)
+        local count = ffi.new('size_t[1]')
+        local prot = api.decay_protection(address, #bytes)
+        decay_last_protection = prot or 0
+        -- Pages that are already writable (or copy-on-write) need no change.
+        if kernel.WriteProcessMemory(process, pointer, bytes, #bytes, count) ~= 0
+            and count[0] == #bytes then
+            return true
+        end
+        if prot == nil or prot == DECAY_PROT_READWRITE then return false end
+        local old = ffi.new('uint32_t[1]')
+        if protect_region(pointer, #bytes, DECAY_PROT_READWRITE, old) == 0 then return false end
+        decay_protect_calls = decay_protect_calls + 1
+        local ok = kernel.WriteProcessMemory(process, pointer, bytes, #bytes, count) ~= 0
+            and count[0] == #bytes
+        -- Always restore, even when the write failed, so the game keeps the page
+        -- protection it established.
+        local restored = ffi.new('uint32_t[1]')
+        protect_region(pointer, #bytes, old[0], restored)
+        return ok
+    end
+
+    function api.decay_status()
+        return {protection = decay_last_protection, protect_calls = decay_protect_calls}
+    end
+
+    -- Raw region query for the corpse-clear scan.
+    --
+    -- Contract: `address` is a plain number, and `base` comes back as a plain
+    -- number too. LuaJIT refuses to compare a cdata pointer with a number
+    -- ("attempt to compare 'number' with 'unsigned char *'"), so the scan would
+    -- fault while walking regions if a pointer ever leaked into the cursor.
+    -- Callers that need a pointer ask cast_uint8 for it.
+    function api.query_region(address)
+        if address == nil then return nil end
+        local region = ffi.new('HsuMemoryRegion[1]')
+        local pointer = ffi.cast('const void *', address)
+        if query_region(pointer, region, ffi.sizeof(region[0])) ~= ffi.sizeof(region[0]) then
+            return nil
+        end
+        return tonumber(ffi.cast('uintptr_t', region[0].base)), tonumber(region[0].size),
+               region[0].state, region[0].protection, region[0].type
+    end
+
+    function api.cast_uint8(address)
+        return ffi.cast('uint8_t *', address)
+    end
+
+    function api.offset(pointer, bytes)
+        return pointer + bytes
+    end
+
+    function api.encode_f32(value)
+        local buffer = ffi.new('float[1]', value)
+        return ffi.string(buffer, 4)
+    end
+
+    function api.encode_u32(value)
+        local buffer = ffi.new('uint32_t[1]', value)
+        return ffi.string(buffer, 4)
     end
 
     function api.module_hash(module)

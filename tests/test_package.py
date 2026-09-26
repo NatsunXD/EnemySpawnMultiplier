@@ -158,13 +158,17 @@ def main():
         assert resources[resource_hash(implementation_name)].startswith(b'\x1bLJ\x02\x02')
         assert payloads['data/' + archive_name + '.stream'] == b''
         assert payloads['data/' + archive_name + '.gpu_resources'] == b''
-        assert b'virtualprotect' not in main_archive.lower()
+        # VirtualProtect is permitted for one narrow purpose: toggling a
+        # MEM_PRIVATE, non-executable data page for the corpse-decay snapshot and
+        # restoring it. The build-time guard in scripts/module.py enforces that it
+        # can only appear in windows_api.lua; every other native-modification API
+        # stays banned outright.
         assert b'flushinstructioncache' not in main_archive.lower()
         for data in payloads.values():
             lowered = data.lower()
             assert b'users\\' not in lowered and b'users/' not in lowered
             assert b'asset-key' not in lowered and b'hd2_native_stick.dll' not in lowered
-            assert b'virtualprotect' not in lowered and b'flushinstructioncache' not in lowered
+            assert b'flushinstructioncache' not in lowered
             assert b'createremotethread' not in lowered and b'loadlibrary' not in lowered
         with tempfile.TemporaryDirectory() as temporary:
             destination = Path(temporary) / 'An unrelated install location'

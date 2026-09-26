@@ -20,11 +20,13 @@ assert(model.pending.patrol_size == 1.0)
 assert(approx(model.pending.encounter_cd, 2.0))
 assert(approx(model.pending.patrol_cd, 2.0))
 assert(model.pending.preset == 'heavy')
+assert(model.pending.fast_corpse == true)
 pass('panel defaults to 2x budget, 1x patrol count, fast cooldowns and heavy')
 
--- Five sliders and three radios, in the documented order.
+-- Five sliders, one checkbox and three radios, in the documented order.
 local widgets = model.layout()
-assert(#widgets.sliders == 5 and #widgets.radios == 3 and #widgets.buttons == 3)
+assert(#widgets.sliders == 5 and #widgets.checkboxes == 1 and #widgets.radios == 3 and #widgets.buttons == 3)
+assert(widgets.checkboxes[1].key == 'fast_corpse' and #widgets.checkboxes[1].label > 0)
 assert(widgets.sliders[1].key == 'budget')
 assert(widgets.sliders[2].key == 'patrol_count')
 assert(widgets.sliders[3].key == 'patrol_size')
@@ -36,10 +38,13 @@ assert(type(widgets.buttons[3].label) == 'string' and #widgets.buttons[3].label 
 assert(widgets.radios[1].value == 'heavy')
 assert(widgets.radios[2].value == 'light_medium')
 assert(widgets.radios[3].value == 'native')
-pass('panel exposes four sliders, three radios and an export button')
+pass('panel exposes five sliders, the corpse checkbox and three radios')
 
 -- Every label the panel paints must be present and non-empty.
 for _, control in ipairs(widgets.sliders) do
+    assert(type(control.label) == 'string' and #control.label > 0)
+end
+for _, control in ipairs(widgets.checkboxes) do
     assert(type(control.label) == 'string' and #control.label > 0)
 end
 for _, control in ipairs(widgets.radios) do
@@ -86,6 +91,10 @@ for _, control in ipairs(widgets.sliders) do
     local kind, hit = model.hit(control.track_x + control.track_w / 2, control.track_y)
     assert(kind == 'slider' and hit.key == control.key)
 end
+for _, control in ipairs(widgets.checkboxes) do
+    local kind, hit = model.hit(control.x + 4, control.y + 4)
+    assert(kind == 'checkbox' and hit.key == control.key)
+end
 for _, control in ipairs(widgets.radios) do
     local kind, hit = model.hit(control.x + 4, control.y + 4)
     assert(kind == 'radio' and hit.value == control.value)
@@ -96,6 +105,19 @@ for _, control in ipairs(widgets.buttons) do
 end
 assert(model.hit(5, 5) == 'title')
 assert(model.hit(5, model.CLIENT_H - 5) == nil)
+-- Adding a control must not let the derived stack run off the bottom of the window.
+for _, control in ipairs(widgets.sliders) do
+    assert(control.y >= 0 and control.y + control.h <= model.CLIENT_H)
+end
+for _, control in ipairs(widgets.checkboxes) do
+    assert(control.y >= 0 and control.y + control.h <= model.CLIENT_H)
+end
+for _, control in ipairs(widgets.radios) do
+    assert(control.y >= 0 and control.y + control.h <= model.CLIENT_H)
+end
+for _, control in ipairs(widgets.buttons) do
+    assert(control.y >= 0 and control.y + control.h <= model.CLIENT_H)
+end
 pass('hit testing agrees with the painted control geometry')
 
 -- settings() must map onto the patch.configure() surface with rate multipliers.
@@ -108,6 +130,7 @@ assert(approx(wanted.patrol_count, 1.0))
 assert(approx(wanted.patrol_size, 1.0))
 assert(approx(wanted.encounter_cd_seconds, 2.0))
 assert(approx(wanted.patrol_cd_seconds, 2.0))
+assert(wanted.fast_corpse == true)
 assert(wanted.preset == 'heavy')
 model.pending.encounter_cd = 30.0
 model.pending.patrol_cd = 30.0
@@ -127,6 +150,7 @@ local fake_patch = {
 model.reset()
 assert(model.apply(fake_patch))
 assert(captured and approx(captured.patrol_count, 1.0) and captured.preset == 'heavy')
+assert(captured.fast_corpse == true)
 assert(model.committed and approx(model.committed.budget, 2.0))
 local failing = {
     cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
@@ -148,13 +172,14 @@ model.sync_from_patch({budget_multiplier = 6.0, modifier_patrol_count = 0.1,
                        encounter_max_interval = 2.0, modifier_patrol_cooldown = 6.0,
                        cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
                        template_bias_enabled = true, template_bias_light = 0.25,
-                       template_bias_heavy = 4.0})
+                       template_bias_heavy = 4.0, fast_corpse = false})
 assert(approx(model.pending.budget, 6.0))
 assert(approx(model.pending.patrol_count, 0.1))
 assert(approx(model.pending.patrol_size, 2.0))
 assert(approx(model.pending.encounter_cd, 2.0))
 assert(approx(model.pending.patrol_cd, 2.0))
 assert(model.pending.preset == 'heavy')
+assert(model.pending.fast_corpse == false)
 model.sync_from_patch({budget_multiplier = 2.0, modifier_patrol_count = 2.0,
                        modifier_travelers_max_unit = 2.0, encounter_deadline_enabled = false,
                        encounter_max_interval = 2.0, modifier_patrol_cooldown = 1.0,
@@ -171,16 +196,19 @@ model.sync_from_patch({budget_multiplier = 2.0, modifier_patrol_count = 2.0,
                        cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0,
                        template_bias_enabled = false})
 assert(model.pending.preset == 'native')
+assert(model.pending.fast_corpse == false)
 pass('panel sync mirrors the live profile and preset')
 
 -- Reset must restore every documented default.
 model.pending.budget = 5.5
 model.pending.preset = 'native'
 model.pending.patrol_cd = 30.0
+model.pending.fast_corpse = false
 model.reset()
 assert(approx(model.pending.budget, 2.0))
 assert(model.pending.preset == 'heavy')
 assert(approx(model.pending.patrol_cd, 2.0))
+assert(model.pending.fast_corpse == true)
 pass('panel reset restores the documented defaults')
 
 -- Risk thresholds drive the red value text and the corner warning. The boundary

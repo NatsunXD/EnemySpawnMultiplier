@@ -152,6 +152,7 @@ return function(create_model, patch, callbacks)
         typedef int32_t (*ESP_RoundRect_t)(void *, int32_t, int32_t, int32_t, int32_t,
                                            int32_t, int32_t);
         typedef int32_t (*ESP_Ellipse_t)(void *, int32_t, int32_t, int32_t, int32_t);
+        typedef int32_t (*ESP_Rectangle_t)(void *, int32_t, int32_t, int32_t, int32_t);
         typedef int32_t (*ESP_SetTextColor_t)(void *, uint32_t);
         typedef int32_t (*ESP_SetBkMode_t)(void *, int32_t);
     ]]
@@ -204,6 +205,7 @@ return function(create_model, patch, callbacks)
         DeleteDC = 'ESP_DeleteDC_t',
         RoundRect = 'ESP_RoundRect_t',
         Ellipse = 'ESP_Ellipse_t',
+        Rectangle = 'ESP_Rectangle_t',
         SetTextColor = 'ESP_SetTextColor_t',
         SetBkMode = 'ESP_SetBkMode_t',
     }) do
@@ -484,6 +486,20 @@ return function(create_model, patch, callbacks)
             end
         end
 
+        for _, item in ipairs(widgets.checkboxes or {}) do
+            local checked = model.pending[item.key] and true or false
+            local cx, cy = item.x + 4, item.y + item.h / 2
+            -- Square check box. A filled accent square reads clearly at this size
+            -- and avoids relying on a glyph the UI font may not carry.
+            local box_brush = brush(checked and C_ACCENT or C_TRACK)
+            local old_box = gdi32.SelectObject(memory, box_brush)
+            gdi32.Rectangle(memory, cx - 7, cy - 7, cx + 7, cy + 7)
+            gdi32.SelectObject(memory, old_box)
+            gdi32.DeleteObject(box_brush)
+            draw_text(memory, item.label, item.x + 24, item.y, item.w - 24, item.h,
+                      checked and C_TITLE or C_LABEL)
+        end
+
         draw_text(memory, '模板预设', 24, model.PRESET_HEADER_Y, 200, 20, C_DIM)
         for _, item in ipairs(widgets.radios) do
             local selected = model.pending[item.key] == item.value
@@ -520,13 +536,13 @@ return function(create_model, patch, callbacks)
         if panel.status ~= '' and os.clock() < panel.status_until then
             footer, footer_color = panel.status, C_OK
         end
-        draw_text(memory, footer, 24, model.BUTTONS_Y + 40, CLIENT_W - 48, 24, footer_color)
+        draw_text(memory, footer, 24, model.BUTTONS_Y + 36, CLIENT_W - 48, 22, footer_color)
 
         -- High-pressure warning, bottom right. It reflects the editor state, so it
         -- appears as soon as a slider crosses the threshold and clears when the
         -- player moves it back; Apply is not required.
         if model.pressure_warning() then
-            draw_text(memory, PRESSURE_WARNING, 264, CLIENT_H - 26, CLIENT_W - 288, 22, C_WARN, true)
+            draw_text(memory, PRESSURE_WARNING, 264, CLIENT_H - 24, CLIENT_W - 288, 22, C_WARN, true)
         end
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)
@@ -542,6 +558,9 @@ return function(create_model, patch, callbacks)
         if kind == 'slider' then
             panel.drag_slider = item
             model.set_slider(item, x)
+            user32.InvalidateRect(panel.window, nil, 0)
+        elseif kind == 'checkbox' then
+            model.pending[item.key] = not model.pending[item.key]
             user32.InvalidateRect(panel.window, nil, 0)
         elseif kind == 'radio' then
             model.pending[item.key] = item.value

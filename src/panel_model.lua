@@ -8,7 +8,7 @@ return function()
 
     -- Width fits the full 'EnemySpawnMultiplier v21 by Natsun' title plus the
     -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 560, 452
+    M.CLIENT_W, M.CLIENT_H = 560, 500
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
     M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
@@ -28,6 +28,7 @@ return function()
     local DEFAULTS = {
         budget = 2.0, patrol_count = 1.0, patrol_size = 1.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
+        fast_corpse = true,
     }
 
     local SLIDER_LABELS = {
@@ -37,6 +38,11 @@ return function()
         {key = 'encounter_cd', label = '增援 CD', kind = 'cooldown'},
         {key = 'patrol_cd', label = '巡逻 CD', kind = 'cooldown'},
     }
+    -- Simple on/off rows rendered as checkboxes, below the sliders.
+    local CHECKBOX_LABELS = {
+        {key = 'fast_corpse', label = '尸体快速消失'},
+    }
+
     local RADIO_LABELS = {
         {value = 'heavy', label = '偏向重甲（重甲更多）'},
         {value = 'light_medium', label = '偏向轻中甲（轻中甲更多）'},
@@ -62,11 +68,18 @@ return function()
             item.track_x, item.track_w = item.x + 126, item.w - 126 - 78
             item.track_y = item.y + 16
         end
-        -- Preset block sits below the slider rows. Derived from the slider
-        -- block so adding a slider or changing the row pitch cannot silently
-        -- overlap the radios again.
+        -- Checkbox rows sit directly under the slider block; the preset block
+        -- follows them. Everything is derived so adding a slider or a checkbox
+        -- cannot silently overlap what is below it.
         local last_slider = sliders[#sliders]
-        M.PRESET_HEADER_Y = last_slider.y + last_slider.h + 6
+        local checkboxes = {}
+        for index, def in ipairs(CHECKBOX_LABELS) do
+            checkboxes[index] = {key = def.key, label = def.label,
+                                 x = 28, y = last_slider.y + last_slider.h + 8 + (index - 1) * 28,
+                                 w = M.CLIENT_W - 56, h = 24}
+        end
+        local last_checkbox = checkboxes[#checkboxes] or last_slider
+        M.PRESET_HEADER_Y = last_checkbox.y + last_checkbox.h + 6
         local presets_y = M.PRESET_HEADER_Y + 24
         local radios = {}
         for index, def in ipairs(RADIO_LABELS) do
@@ -82,7 +95,7 @@ return function()
             {id = 'reset', label = '重置', x = 180, y = buttons_y, w = 92, h = 32},
             {id = 'export', label = '导出游戏日志', x = 288, y = buttons_y, w = 148, h = 32},
         }
-        return {sliders = sliders, radios = radios, buttons = buttons}
+        return {sliders = sliders, checkboxes = checkboxes, radios = radios, buttons = buttons}
     end
 
     function M.inside(x, y, item)
@@ -157,6 +170,7 @@ return function()
             patrol_size = M.pending.patrol_size,
             encounter_cd_seconds = M.pending.encounter_cd,
             patrol_cd_seconds = M.pending.patrol_cd,
+            fast_corpse = M.pending.fast_corpse,
             preset = M.pending.preset,
         }
     end
@@ -197,6 +211,9 @@ return function()
         M.pending.patrol_cd = M.cooldown_to_value(math.floor(
             (math.min(math.max(patrol_seconds, M.COOLDOWN_FAST), M.COOLDOWN_SLOW) - M.COOLDOWN_FAST)
             / (M.COOLDOWN_SLOW - M.COOLDOWN_FAST) * M.COOLDOWN_STEPS + 0.5))
+        if type(patch.fast_corpse) == 'boolean' then
+            M.pending.fast_corpse = patch.fast_corpse
+        end
         if not patch.template_bias_enabled then
             M.pending.preset = 'native'
         elseif patch.template_bias_light >= patch.template_bias_heavy then
@@ -239,6 +256,11 @@ return function()
             local value = snap(settings[key])
             if value then M.pending[key] = value; changed = true end
         end
+        local fast_corpse = settings.fast_corpse
+        if type(fast_corpse) == 'boolean' then
+            M.pending.fast_corpse = fast_corpse
+            changed = true
+        end
         local preset = settings.preset
         if preset == 'heavy' or preset == 'light_medium' or preset == 'native' then
             M.pending.preset = preset
@@ -262,6 +284,9 @@ return function()
             if M.inside(x, y, {x = item.track_x - 8, y = item.y, w = item.track_w + 16, h = item.h}) then
                 return 'slider', item
             end
+        end
+        for _, item in ipairs(widgets.checkboxes or {}) do
+            if M.inside(x, y, item) then return 'checkbox', item end
         end
         for _, item in ipairs(widgets.radios) do
             if M.inside(x, y, item) then return 'radio', item end

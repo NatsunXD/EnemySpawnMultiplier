@@ -1,5 +1,5 @@
 return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors,
-                create_store, create_diag)
+                create_store, create_diag, create_corpse)
     if _G.EnemySpawnMultiplier then return end
     local state = {revision = build.revision, active = false, status = '', detail = '', elapsed = 1.0}
     _G.EnemySpawnMultiplier = state
@@ -163,6 +163,22 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
 
     report('waiting_for_mission', false)
 
+    -- Fast corpse decay. Runs on its own interval (it accumulates dt internally),
+    -- so it is driven from the same update callback but not the 0.1 s patch timer.
+    local corpse, corpse_last_status, corpse_last_probes = nil, nil, nil
+    if create_corpse then
+        local built, instance, reason = pcall(create_corpse, api)
+        if built and instance then
+            corpse = instance
+            patch.corpse = corpse
+            patch.fast_corpse = true
+            state.corpse = corpse
+            log_line('corpse_ready', 'fast decay enabled by default')
+        else
+            log_line('corpse_unavailable', tostring(built and reason or instance))
+        end
+    end
+
     -- The configuration panel is optional and created only after the game build
     -- validated above. A panel failure is logged and then ignored: the gameplay
     -- patch must keep running even if no window can be created.
@@ -201,6 +217,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             log_line('panel_unavailable', tostring(created and reason or instance))
         end
     end
+
 
     local function now_clock()
         if type(os) == 'table' and type(os.clock) == 'function' then
@@ -274,6 +291,55 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     end
     local function forward(dt, ...)
         check(dt)
+        if corpse then
+            local stepped, reason = pcall(corpse.update, dt)
+            if stepped and type(corpse.status) == 'function' then
+                local snapshot = corpse.status()
+                local marker = string.format('%s/%s/%s/%s/%s/%s/%s/%s',
+                    tostring(snapshot.mode), tostring(snapshot.located),
+                    tostring(snapshot.applied), tostring(snapshot.already),
+                    tostring(snapshot.skipped), tostring(snapshot.dynamic_candidates),
+                    tostring(snapshot.decayer_applied), tostring(snapshot.decayer_already))
+                if marker ~= corpse_last_status then
+                    corpse_last_status = marker
+                    local probes = type(snapshot.header_probes) == 'table'
+                        and table.concat(snapshot.header_probes, '|') or ''
+                    local prot = ''
+                    if type(snapshot.decay_api) == 'table' then
+                        prot = string.format(' prot=%#x vp=%s',
+                            tonumber(snapshot.decay_api.protection) or 0,
+                            tostring(snapshot.decay_api.protect_calls))
+                    end
+                    local reasons = {}
+                    if type(snapshot.skip_reasons) == 'table' then
+                        for k, v in pairs(snapshot.skip_reasons) do
+                            reasons[#reasons + 1] = tostring(k) .. '=' .. tostring(v)
+                        end
+                        table.sort(reasons)
+                    end
+                    log_line('corpse_status', string.format(
+                        'mode=%s located=%s applied=%s already=%s skipped=%s candidates=%s decayer=%s/%s/%s reason=%s reasons=%s',
+                        tostring(snapshot.mode), tostring(snapshot.located),
+                        tostring(snapshot.applied), tostring(snapshot.already),
+                        tostring(snapshot.skipped), tostring(snapshot.dynamic_candidates),
+                        tostring(snapshot.decayer_applied), tostring(snapshot.decayer_already),
+                        tostring(snapshot.decayer_skipped),
+                        tostring(snapshot.reason), table.concat(reasons, ',')) .. prot)
+                    if probes ~= '' and not corpse_last_probes then
+                        corpse_last_probes = probes
+                        log_line('corpse_probe', probes)
+                    end
+                end
+            end
+            if not stepped then
+                -- The scan touches foreign memory; a fault here must not stop the
+                -- gameplay patch, so disable just this feature.
+                log_line('corpse_disabled', tostring(reason))
+                if patch.corpse then patch.corpse.set_enabled(false) end
+                patch.fast_corpse = false
+                corpse, state.corpse = nil, nil
+            end
+        end
         if panel then
             local pumped, reason = pcall(panel.pump)
             if not pumped then

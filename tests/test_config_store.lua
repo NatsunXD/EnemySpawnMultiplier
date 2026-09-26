@@ -13,7 +13,7 @@ local store = create_store({dir = directory})
 
 -- A full profile survives an encode/decode round trip unchanged.
 local profile = {budget = 4.5, patrol_count = 3.0, patrol_size = 0.5,
-                 encounter_cd = 12.0, patrol_cd = 2.0, preset = 'light_medium'}
+                 encounter_cd = 12.0, patrol_cd = 2.0, preset = 'light_medium', fast_corpse = false}
 local text = store.encode(profile)
 assert(type(text) == 'string' and text:sub(1, 8) == 'version=')
 assert(text:find('patrol_size=0.5', 1, true), 'patrol_size must be persisted')
@@ -22,6 +22,7 @@ assert(decoded, tostring(reason))
 assert(decoded.budget == 4.5 and decoded.patrol_count == 3.0 and decoded.patrol_size == 0.5)
 assert(decoded.encounter_cd == 12.0 and decoded.patrol_cd == 2.0)
 assert(decoded.preset == 'light_medium')
+assert(decoded.fast_corpse == false)
 pass('a profile survives an encode/decode round trip')
 
 -- Patrol size remains range checked when loaded from disk.
@@ -35,6 +36,7 @@ assert(store.save(profile))
 local loaded, load_reason = store.load()
 assert(loaded, tostring(load_reason))
 assert(loaded.budget == 4.5 and loaded.preset == 'light_medium')
+assert(loaded.fast_corpse == false)
 assert(not io.open(directory .. '/EnemySpawnMultiplier.cfg.tmp', 'r'), 'temp file was left behind')
 pass('save/load round-trips through the file system and leaves no temp file')
 

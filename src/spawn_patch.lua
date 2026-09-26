@@ -207,6 +207,10 @@ function patch.configure(settings)
     if preset ~= nil and preset ~= 'native' and not patch.presets[preset] then
         return false, 'preset_unknown'
     end
+    local next_fast_corpse = settings.fast_corpse
+    if next_fast_corpse ~= nil and type(next_fast_corpse) ~= 'boolean' then
+        return false, 'fast_corpse_not_boolean'
+    end
 
     if next_budget then
         patch.budget_multiplier = next_budget
@@ -229,6 +233,13 @@ function patch.configure(settings)
         local rate = cooldown_profile(next_patrol_cd, patch.patrol_cooldown_fast_rate)
         if not rate then return false, 'patrol_cd_profile_mismatch' end
         patch.modifier_patrol_cooldown = rate
+    end
+    if next_fast_corpse ~= nil then
+        -- The corpse module owns its own scan state; toggling it here keeps the
+        -- panel switch and the live behaviour in one place. Keep the mirror
+        -- field current even when the optional module is unavailable.
+        if patch.corpse then patch.corpse.set_enabled(next_fast_corpse) end
+        patch.fast_corpse = next_fast_corpse
     end
     if preset then
         local weights = patch.presets[preset]

@@ -34,8 +34,13 @@ remain only as a fallback and a mismatch merely marks the faction unknown.
 ## 1. Runtime boundary
 
 The module writes committed `MEM_PRIVATE/PAGE_READWRITE` data only. It never
-changes executable pages and does not import `VirtualProtect`,
-`FlushInstructionCache`, `CreateRemoteThread` or `LoadLibrary`. Read-only
+changes executable pages and does not import `FlushInstructionCache`,
+`CreateRemoteThread` or `LoadLibrary`. The only protection change is scoped to
+the corpse-decay snapshot: `windows_api.lua` may call `VirtualProtect` on a
+`MEM_PRIVATE`, non-executable data page, writes the record, and restores the
+previous protection immediately. No executable page, module image or mapped file
+view is ever passed to it, and every other source file remains barred from the
+API. Read-only
 resource tables and image-backed cap tables are copied into private writable
 allocations and their owning pointer is retargeted before any edit. Both the
 executable and `game.dll` are SHA-256 checked before the first write.
@@ -671,12 +676,78 @@ second and rotated at 4 MB.
 | `w=` | biased/available candidates, or the fallback reason |
 | `cfg=` | active resolver result, `l=vanilla` confirms code branches untouched |
 
-## 9. Validation status
+## 9. Fast corpse decay
 
-Offline: 24 synthetic checks on the data path, 15 profile checks shared by Fast
-Cadence, the panel build and the `2x/3x` preview, 12 panel-model checks, 6 bindings
-bridge checks, 6 anchor-probe checks, 8 real Win32 panel smoke checks, 8 panel
-loader-integration checks, and 7 package checks. They cover budget and cap scaling,
+The panel's "Fast corpse disappearance" switch (on by default) uses the recovered
+`DecaySettings` records from DeleteTheDead (CorpseCleanup v1). The field layout
+comes from the game typelib and the community `DecaySettings.json`:
+
+| Offset | Field | Type | Native value |
+|---|---|---|---|
+| `+0x00` | `mode` | `DeathDecayMode` | `0=None, 1=Regular, 2=Long, 3=Instant` |
+| `+0x04` | `acceleration` | `f32` | identity/guard value |
+| `+0x08` | `min_delay` | `f32` | 5, 7 or 10 s |
+| `+0x0C` | `max_delay` | `f32` | 90 s |
+| `+0x10` | `unk_float` | `f32` | 0 or 8; DeleteTheDead target = 10 |
+
+Only `DeathDecayMode_Regular` rows are written; both delays become `0.1 s`. The
+100 recorded anchors are offsets into the loaded generated-entity table (header
+`70 CA C1 80 4C 44 4C 44 01 00 00 00`), not offsets into `game.dll`. Those anchors
+are a fast path only: the table is rebuilt across updates and mission loads, and
+the 1.8.46015 layout no longer matches them.
+
+The table must be the `MEM_PRIVATE` (`0x20000`) heap copy. `generated_entities`
+also exists in the process as a `MEM_MAPPED` (`0x40000`) read-only image of the
+same file, and its bytes match the table header and every `DecaySettings`
+signature. Writes to the mapped image are refused, which presents as
+`applied=0` with a rising `skipped`/candidate count while the feature appears to
+do nothing. DeleteTheDead records the same distinction ("is a mapped region, not
+the private copy (kept looking)"); the module now skips mapped headers and keeps
+searching for the private copy, reporting the count as `mapped_headers`.
+
+When every fixed anchor fails its identity check, the module performs a bounded,
+continuous signature scan of the live entity table. A record is accepted only
+when the complete `DecaySettings` shape matches:
+`mode == Regular`, `acceleration in {0.2, 0.5}`, a native `min_delay` of
+`5/7/10/30/60`, a native `max_delay` of `90/120`, `unk_float in {0, 8, 10}`,
+`unk_bool <= 1`, and zeroed trailing padding. Records are not assumed to be
+4-byte aligned: the current table places them at `offset % 4 == 2`.
+
+The recovered DeleteTheDead data raises `unk_float` from `0/8` to `10`; it is not
+a delay in seconds, and the original mod treats it as part of the decay timing.
+The module applies the same direction while setting both delays to `0.1`.
+Disabling the switch restores `min_delay`, `max_delay` and `unk_float` from the
+values captured immediately before the first write.
+
+## 10. Corpse decay eligibility
+
+Two independent components control whether a corpse visibly disappears, and the
+original DeleteTheDead patch edits both:
+
+| Component | Fields | Native | Applied |
+|---|---|---|---|
+| `HealthComponent.DecaySettings` | `mode`, `acceleration`, `min_delay`, `max_delay`, `unk_float` | `min 5/7/10/30/60`, `max 90/120`, `unk_float 0/8` | `min = max = 0.1`, `unk_float = 10` |
+| `CorpseDecayerComponent` | `radius` (f32), `node` (u32 hash) | `1` or `3` | `300` |
+
+`CorpseDecayerComponent.radius` is the distance check that decides whether a
+corpse is eligible to decay at all. Editing only `DecaySettings` shortens the
+delay for corpses that already passed that check, which is why the earlier
+builds wrote 100 records successfully (`applied=100`, confirmed by read-back)
+yet showed no visible change: the eligibility radius still excluded the corpses
+the player was looking at. Raising it to 300 matches the recovered patch and is
+what makes the effect visible.
+
+Both tables are identity-checked, both fall back to a full field-signature scan
+when their fixed anchors no longer match the rebuilt table, and both are
+restored when the panel switch is turned off.
+
+## 11. Validation status
+
+Offline: 30 synthetic checks on the data path, 15 profile checks shared by Fast
+Cadence, the panel build and the `2x/3x` preview, 16 panel-model checks, 12 corpse-
+decay checks, 6 config-store checks, 6 bindings bridge checks, 6 anchor-probe
+checks, 8 real Win32 panel smoke checks, 8 panel loader-integration checks, and
+7 package checks. They cover budget and cap scaling,
 timer clamping, idempotence, live reconfiguration without stacking, restoring
 candidate weights on a preset switch, config resolution, resource and cap-table
 cloning, template bias, mission rebuilds, queue and counter preservation, curve

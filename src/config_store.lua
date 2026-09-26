@@ -19,7 +19,7 @@ return function(options)
     M.FILENAME = options.filename or 'EnemySpawnMultiplier.cfg'
 
     -- Written in this order so the file is stable and diffable.
-    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset'}
+    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset', 'fast_corpse'}
 
     -- Same ranges the panel and patch.configure() enforce. Values read back out
     -- of range are clamped here so a corrupt file degrades to a valid profile
@@ -67,6 +67,8 @@ return function(options)
                     lines[#lines + 1] = key .. '=' .. format_number(value)
                 elseif type(value) == 'string' and PRESETS[value] then
                     lines[#lines + 1] = key .. '=' .. value
+                elseif key == 'fast_corpse' and type(value) == 'boolean' then
+                    lines[#lines + 1] = key .. '=' .. (value and 'true' or 'false')
                 end
             end
         end
@@ -85,6 +87,9 @@ return function(options)
                         version = tonumber(value)
                     elseif key == 'preset' then
                         if PRESETS[value] then settings.preset = value end
+                    elseif key == 'fast_corpse' then
+                        if value == 'true' then settings.fast_corpse = true
+                        elseif value == 'false' then settings.fast_corpse = false end
                     elseif LIMITS[key] then
                         local number = tonumber(value)
                         if number and number == number then

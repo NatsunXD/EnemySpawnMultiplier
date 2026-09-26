@@ -218,6 +218,10 @@ def main():
         tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes()),
                              settings['modifier_patrol_count'], settings['modifier_travelers_max_unit']], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_model.lua', SOURCE, build], env=env)
+    if variant.get('panel', False):
+        tests += '\n' + run([LUA, TESTS / 'test_corpse_clear.lua', SOURCE, build], env=env)
+    if os.name == 'nt':
+        tests += '\n' + run([LUA, TESTS / 'test_windows_api.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_config_store.lua', SOURCE, build], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_diag_export.lua', SOURCE], env=env)
     if variant.get('panel', False) and os.name == 'nt':
@@ -326,6 +330,11 @@ def main():
         },
         'continuous_update_hook': True, 'shutdown_hook': False, 'executable_code_writes': 0,
         'executable_memory_changed': False,
+        'corpse_decay': {'mode': 'regular_only', 'min_delay': 0.1, 'max_delay': 0.1,
+                         'decay_float': 10.0, 'scan_interval_seconds': 0.5,
+                         'identity_checked': True,
+                         'decayer': {'component': 'CorpseDecayerComponent',
+                                     'radius': 300.0, 'scan_interval_seconds': 0.5}},
         'configuration_panel': bool(variant.get('panel', False)),
         'loader_integration': {
             'minimum_loader_version': 15, 'api': 1,
