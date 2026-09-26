@@ -47,6 +47,91 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     -- against the shipped implementation rather than a reimplementation.
     state.log = log_line
 
+    -- Matchmaking privacy from the account settings file (Options → Gameplay →
+    -- Matchmaking Privacy). privacy_mode 0 = Public; any other value is treated
+    -- as non-public (Friends Only). When Public, spawn writes are skipped so a
+    -- public lobby is not running the multiplier.
+    --
+    -- Do NOT use io.popen('cmd /c ...') here: on Windows that flashes a visible
+    -- console every poll (~2s). Enumerate with FindFirstFileA and only io.open
+    -- the chosen file afterwards.
+    local PRIVACY_PUBLIC = 0
+    local privacy = {raw = nil, label = 'unknown', public = false, path = nil, last_log = nil}
+    local function find_user_settings(directory)
+        local ok, chosen = pcall(function()
+            local ffi = require('ffi')
+            local kernel = ffi.load('kernel32')
+            -- Opaque WIN32_FIND_DATAA (320 bytes). cFileName starts at offset 44;
+            -- ftLastWriteTime (two DWORDs) at offset 20. Avoid named structs so a
+            -- competing addon's cdef does not collide.
+            local FindFirstFileA = ffi.cast(
+                'void *(*)(const char *, void *)', kernel.FindFirstFileA)
+            local FindNextFileA = ffi.cast(
+                'int (*)(void *, void *)', kernel.FindNextFileA)
+            local FindClose = ffi.cast('int (*)(void *)', kernel.FindClose)
+            local data = ffi.new('uint8_t[320]')
+            local pattern = directory .. '\\*_user_settings.config'
+            local handle = FindFirstFileA(pattern, data)
+            if handle == nil or handle == ffi.cast('void *', -1) then
+                return nil
+            end
+            local best_name, best_high, best_low = nil, -1, -1
+            repeat
+                local name = ffi.string(data + 44)
+                if name ~= '' and not name:find('%.old$', 1, false)
+                    and name:find('_user_settings%.config$', 1, false) then
+                    local low = ffi.cast('uint32_t *', data + 20)[0]
+                    local high = ffi.cast('uint32_t *', data + 24)[0]
+                    if high > best_high or (high == best_high and low > best_low) then
+                        best_name, best_high, best_low = name, high, low
+                    end
+                end
+            until FindNextFileA(handle, data) == 0
+            FindClose(handle)
+            return best_name
+        end)
+        if ok then return chosen end
+        return nil
+    end
+    local function read_privacy()
+        local appdata = os.getenv('APPDATA')
+        if not appdata then return privacy end
+        local directory = appdata .. '\\Arrowhead\\Helldivers2\\saves'
+        local path = privacy.path
+        if path then
+            local probe = io.open(path, 'r')
+            if not probe then
+                privacy.path = nil
+                path = nil
+            else
+                probe:close()
+            end
+        end
+        if not path then
+            local chosen = find_user_settings(directory)
+            if not chosen then return privacy end
+            path = directory .. '\\' .. chosen
+        end
+        local file = io.open(path, 'r')
+        if not file then
+            privacy.path = nil
+            return privacy
+        end
+        local body = file:read('*a') or ''
+        file:close()
+        local raw = tonumber(body:match('privacy_mode%s*=%s*(%-?%d+)'))
+        privacy.path = path
+        privacy.raw = raw
+        if raw == nil then
+            privacy.label, privacy.public = 'unknown', false
+        elseif raw == PRIVACY_PUBLIC then
+            privacy.label, privacy.public = 'public', true
+        else
+            privacy.label, privacy.public = 'friends', false
+        end
+        return privacy
+    end
+
     local function diag_snapshot()
         local diag = type(patch.diag) == 'table' and patch.diag or {}
         return {
@@ -60,6 +145,8 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             string.format('upd_window_ms=%.2f', blackbox.window_ms),
             string.format('upd_window_calls=%d', blackbox.window_calls),
             string.format('bb_alerts=%d', blackbox.alerts),
+            string.format('privacy=%s', tostring(privacy.label)),
+            string.format('privacy_raw=%s', tostring(privacy.raw)),
             string.format('clone_active=%s', tostring(diag.resource_clone_active == true)),
             string.format('clone_size=%s', tostring(diag.resource_clone_size or 0)),
             string.format('clone_events=%s', tostring(diag.resource_clone_events or 0)),
@@ -162,6 +249,10 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     end
 
     report('waiting_for_mission', false)
+    read_privacy()
+    log_line('bb_privacy', string.format('privacy=%s raw=%s public=%s',
+        tostring(privacy.label), tostring(privacy.raw), tostring(privacy.public)))
+    privacy.last_log = string.format('%s/%s', tostring(privacy.label), tostring(privacy.raw))
 
     -- Fast corpse decay. Runs on its own interval (it accumulates dt internally),
     -- so it is driven from the same update callback but not the 0.1 s patch timer.
@@ -173,7 +264,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             patch.corpse = corpse
             patch.fast_corpse = true
             state.corpse = corpse
-            log_line('corpse_ready', 'fast decay enabled by default')
+            log_line('corpse_ready', 'fast decay ~5s ragdoll-preserving; enabled by default')
         else
             log_line('corpse_unavailable', tostring(built and reason or instance))
         end
@@ -228,13 +319,53 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
 
     local previous = update
     local stopped, elapsed = false, 0.1
+    local privacy_elapsed = 1.0
+    -- Once Public is seen while a mission is live, keep spawn/corpse gated until
+    -- back on the ship. Flipping Friends mid-mission used to re-enable writes into
+    -- a live director and correlated with a hard crash (diag 20260926-182912).
+    local privacy_sticky = false
+    local privacy_gated = false
+    local function mission_live()
+        if type(patch.in_mission) ~= 'function' then return false end
+        local ok, yes = pcall(patch.in_mission, api, game)
+        return ok and yes == true
+    end
     local function check(dt)
         if stopped then return end
         elapsed = elapsed + ((type(dt) == 'number' and dt == dt and dt > 0) and dt or 0)
         if elapsed < 0.1 then return end
         elapsed = 0
+        privacy_elapsed = privacy_elapsed + 0.1
+        if privacy_elapsed >= 2.0 then
+            privacy_elapsed = 0
+            read_privacy()
+            local marker = string.format('%s/%s', tostring(privacy.label), tostring(privacy.raw))
+            if marker ~= privacy.last_log then
+                privacy.last_log = marker
+                log_line('bb_privacy', string.format('privacy=%s raw=%s public=%s sticky=%s',
+                    tostring(privacy.label), tostring(privacy.raw), tostring(privacy.public),
+                    tostring(privacy_sticky)))
+            end
+        end
+        local live = mission_live()
+        if privacy.public then
+            privacy_sticky = true
+        end
+        if not live and privacy_sticky and not privacy.public then
+            log_line('bb_privacy_latch', 'cleared on ship')
+            privacy_sticky = false
+        elseif not live then
+            privacy_sticky = privacy.public
+        end
+        privacy_gated = privacy.public or privacy_sticky
         local t0 = now_clock()
-        local called, accepted, reason, active = pcall(patch.apply, api, game)
+        local called, accepted, reason, active
+        if privacy_gated then
+            -- Public (or sticky after Public): do not write spawn multipliers.
+            called, accepted, reason, active = true, true, 'privacy_gate_public', false
+        else
+            called, accepted, reason, active = pcall(patch.apply, api, game)
+        end
         local upd_ms = (now_clock() - t0) * 1000.0
         blackbox.last_upd_ms = upd_ms
         local now = now_clock()
@@ -291,7 +422,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     end
     local function forward(dt, ...)
         check(dt)
-        if corpse then
+        if corpse and not privacy_gated then
             local stepped, reason = pcall(corpse.update, dt)
             if stepped and type(corpse.status) == 'function' then
                 local snapshot = corpse.status()

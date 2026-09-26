@@ -715,7 +715,8 @@ when the complete `DecaySettings` shape matches:
 
 The recovered DeleteTheDead data raises `unk_float` from `0/8` to `10`; it is not
 a delay in seconds, and the original mod treats it as part of the decay timing.
-The module applies the same direction while setting both delays to `0.1`.
+The module applies the same direction while setting both delays to `5` seconds
+(ragdoll-preserving profile, aligned with Faster Corpse Cleanup normal/5s).
 Disabling the switch restores `min_delay`, `max_delay` and `unk_float` from the
 values captured immediately before the first write.
 
@@ -726,7 +727,7 @@ original DeleteTheDead patch edits both:
 
 | Component | Fields | Native | Applied |
 |---|---|---|---|
-| `HealthComponent.DecaySettings` | `mode`, `acceleration`, `min_delay`, `max_delay`, `unk_float` | `min 5/7/10/30/60`, `max 90/120`, `unk_float 0/8` | `min = max = 0.1`, `unk_float = 10` |
+| `HealthComponent.DecaySettings` | `mode`, `acceleration`, `min_delay`, `max_delay`, `unk_float` | `min 5/7/10/30/60`, `max 90/120`, `unk_float 0/8` | `min = max = 5` (ragdoll-preserving), `unk_float = 10` |
 | `CorpseDecayerComponent` | `radius` (f32), `node` (u32 hash) | `1` or `3` | `300` |
 
 `CorpseDecayerComponent.radius` is the distance check that decides whether a

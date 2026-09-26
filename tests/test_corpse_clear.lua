@@ -1,4 +1,4 @@
--- Fast corpse decay checks: table location, identity guard, the 0.1 write and
+-- Fast corpse decay checks: table location, identity guard, the ~5 s write and
 -- the restore path. Runs against a synthetic entity table; no game memory.
 local source, build = assert(arg[1]), assert(arg[2])
 local ffi = require('ffi')
@@ -116,17 +116,17 @@ assert(st.applied + st.already + st.skipped == #data,
 assert(st.skipped == 0, 'no row should be skipped for a clean table')
 pass('rewrites the decay delays and accounts for every row')
 
--- Spot-check the writes: every Regular row now holds min=max=0.1.
+-- Spot-check the writes: every Regular row now holds min=max=5 (ragdoll profile).
 local checked = 0
 for _, row in ipairs(data) do
     local p = table_base + row[1]
-    assert(approx(get_f32(p + 8), 0.1), 'min_delay not 0.1 at anchor ' .. tostring(row[1]))
-    assert(approx(get_f32(p + 12), 0.1), 'max_delay not 0.1 at anchor ' .. tostring(row[1]))
+    assert(approx(get_f32(p + 8), 5.0), 'min_delay not 5 at anchor ' .. tostring(row[1]))
+    assert(approx(get_f32(p + 12), 5.0), 'max_delay not 5 at anchor ' .. tostring(row[1]))
     assert(approx(get_f32(p + 16), 10.0), 'decay float not 10 at anchor ' .. tostring(row[1]))
     checked = checked + 1
 end
 assert(checked == #data)
-pass('every recorded row holds min_delay = max_delay = 0.1')
+pass('every recorded row holds min_delay = max_delay = 5')
 
 -- Idempotence: running again must not report fresh writes.
 run(2)
@@ -142,7 +142,7 @@ put_f32(table_base + victim + 4, 123.456)
 run(2)
 local st3 = mod.status()
 assert(st3.skipped >= 1, 'a mismatched row must be skipped')
-assert(approx(get_f32(table_base + victim + 8), 0.1),
+assert(approx(get_f32(table_base + victim + 8), 5.0),
     'a row whose identity failed must not have been written again')
 pass('a row whose identity no longer matches is skipped, not written')
 
@@ -220,8 +220,8 @@ assert(dst.dynamic_candidates >= #data,
 assert(dst.applied + dst.already >= #data, 'dynamic scanner did not settle every record')
 for _, row in ipairs(data) do
     local p = table_base + row[1] + SHIFT
-    assert(approx(get_f32(p + 8), 0.1), 'dynamic min_delay not applied')
-    assert(approx(get_f32(p + 12), 0.1), 'dynamic max_delay not applied')
+    assert(approx(get_f32(p + 8), 5.0), 'dynamic min_delay not applied')
+    assert(approx(get_f32(p + 12), 5.0), 'dynamic max_delay not applied')
     assert(approx(get_f32(p + 16), 10.0), 'dynamic decay float not applied')
 end
 pass('dynamic signature scan recovers records after fixed anchors move')
@@ -337,7 +337,7 @@ assert(mixed_ready, 'scanner did not settle on the private copy: ' .. tostring(m
 assert(mst.mapped_headers >= 1, 'the mapped copy was never noticed')
 for _, row in ipairs(data) do
     local p = table_base + row[1]
-    assert(approx(get_f32(p + 8), 0.1), 'private min_delay not applied')
+    assert(approx(get_f32(p + 8), 5.0), 'private min_delay not applied')
     assert(approx(get_f32(p + 16), 10.0), 'private decay float not applied')
 end
 -- The mapped image must be untouched: it still holds the original delays.

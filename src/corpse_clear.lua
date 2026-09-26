@@ -15,8 +15,10 @@
 -- table for the complete Regular DecaySettings signature instead. This keeps the
 -- feature working across table rebuilds without writing to a stale offset.
 --
--- Only mode == Regular is touched. Both delays are set to 0.1 seconds; the
--- original pair is remembered and restored when the panel switch is turned off.
+-- Only mode == Regular is touched. Delays are set to ~5 seconds (not 0.1):
+-- that matches Faster Corpse Cleanup "normal ragdoll" / corpse-clear-5s-v1,
+-- which shortens sink timing while leaving ragdoll physics alone. The original
+-- pair is remembered and restored when the panel switch is turned off.
 return function(api, data, decayer_data)
     local ffi = require('ffi')
     local M = {}
@@ -32,8 +34,9 @@ return function(api, data, decayer_data)
     local DYNAMIC_OVERLAP = 24
 
     local MODE_REGULAR = 1
-    local MIN_DELAY = 0.1
-    local MAX_DELAY = 0.1
+    -- Ragdoll-preserving profile: ~5 s before sink, not near-instant 0.1 s.
+    local MIN_DELAY = 5.0
+    local MAX_DELAY = 5.0
     local DECAY_FLOAT = 10.0
     local RECORD_BYTES = 24
     -- CorpseDecayerComponent: {float radius, uint32 node}. The radius is the

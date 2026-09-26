@@ -267,9 +267,10 @@ return function(create_model, patch, callbacks)
     local C_DANGER   = rgb(0xE5, 0x5B, 0x5B)
     local FOOTER_WAITING = '尚未进入建立：修改已保存，进图后生效'
     local FOOTER_ACTIVE  = '已生效'
+    local FOOTER_PRIVACY = '【民主提示】检测到当前匹配隐私为公开，ESM多倍刷怪不生效！'
     local CD_FAST_LABEL  = '快'
     local CD_SLOW_LABEL  = '慢'
-    local PRESSURE_WARNING = '当前配置压力较大，闪退风险高'
+    local PRESSURE_WARNING = '【民主预警】当前配置压力较大，游戏崩溃风险高'
 
     local CLIENT_W, CLIENT_H = model.CLIENT_W, model.CLIENT_H
 
@@ -474,8 +475,7 @@ return function(create_model, patch, callbacks)
             gdi32.SelectObject(memory, old)
             gdi32.DeleteObject(knob)
             if item.kind == 'cooldown' then
-                -- No numeric readout on the cooldown rows; the two ends carry
-                -- the meaning instead.
+                -- Ends only: the numeric seconds live on the track itself.
                 draw_text(memory, CD_FAST_LABEL, track_x - 34, item.y, 28, item.h, C_DIM, true)
                 draw_text(memory, CD_SLOW_LABEL, track_x + track_w + 6, item.y, 28, item.h, C_DIM, true)
             else
@@ -528,7 +528,9 @@ return function(create_model, patch, callbacks)
         -- Prefer the transient apply result; otherwise state what the committed
         -- configuration will do, so "did it apply?" is never ambiguous.
         local footer, footer_color = nil, C_OK
-        if runtime and runtime.active == false then
+        if runtime and runtime.status == 'privacy_gate_public' then
+            footer, footer_color = FOOTER_PRIVACY, C_DANGER
+        elseif runtime and runtime.active == false then
             footer, footer_color = FOOTER_WAITING, C_WARN
         else
             footer, footer_color = FOOTER_ACTIVE, C_OK
@@ -542,7 +544,7 @@ return function(create_model, patch, callbacks)
         -- appears as soon as a slider crosses the threshold and clears when the
         -- player moves it back; Apply is not required.
         if model.pressure_warning() then
-            draw_text(memory, PRESSURE_WARNING, 264, CLIENT_H - 24, CLIENT_W - 288, 22, C_WARN, true)
+            draw_text(memory, PRESSURE_WARNING, 24, CLIENT_H - 24, CLIENT_W - 48, 22, C_DANGER, true)
         end
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)
