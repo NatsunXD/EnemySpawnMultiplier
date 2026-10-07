@@ -540,7 +540,10 @@ return function(create_model, patch, callbacks)
                       checked and C_TITLE or C_LABEL)
         end
 
-        draw_text(memory, model.text('presets'), 24, model.PRESET_HEADER_Y, 200, 20, C_DIM)
+        draw_text(memory, model.text('presets'), 24, model.PRESET_HEADER_Y, 120, 20, C_DIM)
+        -- Always-visible lobby policy notice (not conditional on privacy status).
+        draw_text(memory, model.text('wild_lobby'), 130, model.PRESET_HEADER_Y,
+                  CLIENT_W - 154, 20, C_DANGER)
         for _, item in ipairs(widgets.radios) do
             local selected = model.pending[item.key] == item.value
             local cx, cy = item.x + 8, item.y + item.h / 2
@@ -567,10 +570,9 @@ return function(create_model, patch, callbacks)
 
         -- Prefer the transient apply result; otherwise state what the committed
         -- configuration will do, so "did it apply?" is never ambiguous.
+        -- Lobby policy is shown next to the preset header, not here.
         local footer, footer_color = nil, C_OK
-        if runtime and runtime.status == 'privacy_gate_public' then
-            footer, footer_color = model.text('privacy'), C_DANGER
-        elseif runtime and runtime.active == false then
+        if runtime and runtime.active == false then
             footer, footer_color = model.text('waiting'), C_WARN
         else
             footer, footer_color = model.text('active'), C_OK
@@ -580,12 +582,13 @@ return function(create_model, patch, callbacks)
         end
         draw_text(memory, footer, 24, model.BUTTONS_Y + 36, CLIENT_W - 48, 22, footer_color)
 
-        -- High-pressure warning, bottom right. It reflects the editor state, so it
+        -- High-pressure warning at the bottom. It reflects the editor state, so it
         -- appears as soon as a slider crosses the threshold and clears when the
         -- player moves it back; Apply is not required.
         if model.pressure_warning() then
             local PRESSURE_WARNING = model.text('pressure')
-            draw_text(memory, PRESSURE_WARNING, 24, CLIENT_H - 24, CLIENT_W - 48, 22, C_DANGER, true)
+            draw_text(memory, PRESSURE_WARNING, 24, CLIENT_H - 24,
+                      CLIENT_W - 48, 22, C_DANGER, true)
         end
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)

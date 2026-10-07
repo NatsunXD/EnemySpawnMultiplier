@@ -10,6 +10,8 @@ v23 按 F8 打开配置面板，可调整增援预算、巡逻数量、巡逻规
 
 F8 面板右下角的 English / 中文按钮即时切换语言；MODS 菜单也有“语言 / Language”选项。语言设置两边同步并保存。F8 文案即时刷新；MODS 文案按照菜单的公开接口，在关闭并重新打开暂停菜单后刷新。切换语言不会应用 F8 中尚未提交的刷怪参数，也不会重置参数。旧版 Mod Options Menu v1.0 仍可同步参数，但其菜单文案固定为英文。
 
+面板在「模板预设」旁始终显示「本模组不支持野房使用！」。匹配隐私为公开时，或房主已消耗 SOS 信标后，模组会跳过刷怪写入（并暂停快速清尸），SOS 侦测为只读、约每 2 秒一次，闩锁后停止扫描。
+
 模组会把诊断信息追加写入 `%LOCALAPPDATA%/EnemySpawnMultiplier.log`。面板内的“导出游戏日志”按钮可以把日志、配置和运行状态导出到桌面诊断包。
 
 ### 安装
@@ -32,7 +34,7 @@ v23 also supports the optional [Mod Options Menu](https://github.com/CowboyBingu
 
 Use the English / 中文 button in F8 or the Language option in MODS. The choice is synchronized and saved. F8 text changes immediately; reopen the escape menu to refresh MODS text. A language change preserves gameplay settings and unapplied F8 drafts. Menu v1.0 can synchronize values but shows static English text.
 
-"Fast corpse disappearance" (ragdoll-preserving) is enabled by default. Every 0.5 seconds the mod checks the live entity data, first trying fixed anchors and then falling back to a full `DecaySettings` signature scan when those have moved. Only `DeathDecayMode_Regular` records are shortened to `min_delay = max_delay = 5 s`; turning the checkbox off restores the original values. When local matchmaking privacy is Public, spawn multipliers are not written.
+"Fast corpse disappearance" (ragdoll-preserving) is enabled by default. Every 0.5 seconds the mod checks the live entity data, first trying fixed anchors and then falling back to a full `DecaySettings` signature scan when those have moved. Only `DeathDecayMode_Regular` records are shortened to `min_delay = max_delay = 5 s`; turning the checkbox off restores the original values. The panel always shows that public lobbies are unsupported. Spawn writes (and fast corpse decay) are skipped while matchmaking privacy is Public, or after the host spends the SOS beacon; the SOS probe is read-only, polls about every 2 seconds, and stops scanning after the latch.
 
 Diagnostics are appended to `%LOCALAPPDATA%/EnemySpawnMultiplier.log`. The panel can export the log, configuration and runtime state to a Desktop diagnostic pack.
 
