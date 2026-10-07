@@ -140,4 +140,61 @@ values[prefix..'language']=1; callbacks[prefix..'language'](1)
 env.update(0.1)
 assert(patch.budget_multiplier==4.7 and saved.language=='zh' and saves==1)
 pass('loader restores cfg and applies MODS changes even when the F8 window fails')
+
+-- Probe failures must block both writers while preserving the previous update.
+local live, writes, decay_updates, scans = true, 0, 0, 0
+local gated_patch = {
+    in_mission=function() return live end,
+    apply=function()
+        writes=writes+1
+        return true, live and 'active' or 'waiting_for_mission', live
+    end,
+}
+local gated_corpse = {
+    update=function() decay_updates=decay_updates+1 end,
+    set_enabled=function() end,
+}
+local function start_gate(create_sos)
+    local isolated = setmetatable({print=function() end,
+        os={getenv=function() return nil end},
+        update=function() return 'forwarded' end}, {__index=_G})
+    isolated._G=isolated
+    local gate_chunk=assert(loadfile(source .. '/archive_loader.lua'))
+    setfenv(gate_chunk,isolated)
+    gate_chunk()(factory,gated_patch,identity,nil,nil,nil,nil,nil,nil,
+        function() return gated_corpse end,nil,nil,create_sos)
+    return isolated
+end
+local thrown=start_gate(function() return {create=function() return {
+    build='ok',probe=function() scans=scans+1; error('probe read failed') end,
+} end} end)
+for _=1,50 do assert(thrown.update(0.1)=='forwarded') end
+assert(scans==1 and writes==0 and decay_updates==0)
+assert(thrown.EnemySpawnMultiplier.status=='sos_probe_unreliable')
+pass('throwing SOS probe blocks spawn and corpse updates without retrying')
+
+for _, failing in ipairs({
+    function() error('factory failed') end,
+    function() return {create=function() error('session failed') end} end,
+}) do
+    local failed=start_gate(failing)
+    assert(failed.update(0.1)=='forwarded')
+    assert(writes==0 and decay_updates==0)
+    assert(failed.EnemySpawnMultiplier.status=='sos_probe_unreliable')
+end
+pass('failed SOS initialization blocks writers and preserves the update chain')
+
+scans=0
+local session={build='ok',sticky=false,unsupported=false}
+session.probe=function()
+    scans=scans+1; session.sticky=true
+    return true,'privacy_gate_sos','spent'
+end
+session.reset_latch=function() session.sticky=false end
+local latched=start_gate(function() return {create=function() return session end} end)
+for _=1,50 do latched.update(0.1) end
+assert(scans==1 and writes==0 and decay_updates==0 and session.sticky)
+live=false; latched.update(0.1)
+assert(not session.sticky and writes==1 and decay_updates==1)
+pass('SOS latch blocks both writers until return to ship')
 print(count .. ' panel loader-integration checks passed; no game process involved.')

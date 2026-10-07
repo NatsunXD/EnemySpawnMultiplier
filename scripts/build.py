@@ -154,9 +154,14 @@ VARIANTS['panel-menus'] = dict(
     VARIANTS['panel'],
     revision='data-v23-panel-menus', public_version='v23', version=23,
     name='Enemy Spawn Multiplier Panel',
-    description=(VARIANTS['panel']['description'] +
-                 ' F8 and the optional MODS menu share applied settings and a saved Chinese/English language choice.'
-                 ' Optional: Mod Options Menu v1.1+ with Bingus Shared Loader v18+ for translated native settings.'),
+    description=(
+        'Panel build with privacy + SOS lobby gates. Skips spawn writes (and fast corpse decay) while '
+        'matchmaking privacy is Public, or after the host spends the SOS beacon (read-only stratagem-slot '
+        'probe; latched for the rest of that mission). Unknown game.dll PE layouts fail closed until offsets '
+        'are updated. SOS scan interval is 2s and stops after latch. F8 and the optional MODS menu share '
+        'applied settings and a saved Chinese/English language choice. Optional: Mod Options Menu v1.1+ with '
+        'Bingus Shared Loader v18+ for translated native settings. Requires the official Bingus Shared Loader '
+        'v15 or newer.'),
 )
 
 
@@ -236,6 +241,7 @@ def main():
         tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes()),
                              settings['modifier_patrol_count'], settings['modifier_travelers_max_unit']], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_model.lua', SOURCE, build], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_sos_probe.lua', SOURCE], env=env)
     if variant.get('panel', False):
         tests += '\n' + run([LUA, TESTS / 'test_corpse_clear.lua', SOURCE, build], env=env)
     if os.name == 'nt':

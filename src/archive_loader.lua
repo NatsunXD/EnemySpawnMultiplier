@@ -1,5 +1,5 @@
 return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors,
-                create_store, create_diag, create_corpse, create_config, create_options)
+                create_store, create_diag, create_corpse, create_config, create_options, create_sos)
     if _G.EnemySpawnMultiplier then return end
     local state = {revision = build.revision, active = false, status = '', detail = '', elapsed = 1.0}
     _G.EnemySpawnMultiplier = state
@@ -57,6 +57,8 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     -- the chosen file afterwards.
     local PRIVACY_PUBLIC = 0
     local privacy = {raw = nil, label = 'unknown', public = false, path = nil, last_log = nil}
+    -- Created after the Windows API is up; diag_snapshot closes over this binding.
+    local sos_probe = nil
     local function find_user_settings(directory)
         local ok, chosen = pcall(function()
             local ffi = require('ffi')
@@ -147,6 +149,10 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             string.format('bb_alerts=%d', blackbox.alerts),
             string.format('privacy=%s', tostring(privacy.label)),
             string.format('privacy_raw=%s', tostring(privacy.raw)),
+            string.format('sos_build=%s', tostring(sos_probe and sos_probe.build or 'absent')),
+            string.format('sos_sticky=%s', tostring(sos_probe and sos_probe.sticky or false)),
+            string.format('sos_unsupported=%s', tostring(sos_probe and sos_probe.unsupported or false)),
+            string.format('sos_event=%s', tostring(sos_probe and sos_probe.last_event or '-')),
             string.format('clone_active=%s', tostring(diag.resource_clone_active == true)),
             string.format('clone_size=%s', tostring(diag.resource_clone_size or 0)),
             string.format('clone_events=%s', tostring(diag.resource_clone_events or 0)),
@@ -257,6 +263,25 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         tostring(privacy.label), tostring(privacy.raw), tostring(privacy.public)))
     privacy.last_log = string.format('%s/%s', tostring(privacy.label), tostring(privacy.raw))
 
+    if create_sos then
+        local built, module = pcall(create_sos)
+        if built and type(module) == 'table' and type(module.create) == 'function' then
+            local made, session = pcall(module.create, api)
+            if made and session then
+                sos_probe = session
+                log_line('bb_sos', 'probe=ready interval=2s fail_closed_on_mismatch=1')
+            else
+                sos_probe = {unsupported = true, build = 'error'}
+                log_line('bb_sos', 'probe=create_failed ' .. tostring(session))
+            end
+        else
+            sos_probe = {unsupported = true, build = 'error'}
+            log_line('bb_sos', 'probe=module_failed ' .. tostring(module))
+        end
+    else
+        log_line('bb_sos', 'probe=absent')
+    end
+
     -- Fast corpse decay. Runs on its own interval (it accumulates dt internally),
     -- so it is driven from the same update callback but not the 0.1 s patch timer.
     local corpse, corpse_last_status, corpse_last_probes = nil, nil, nil
@@ -335,11 +360,13 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     local previous = update
     local stopped, elapsed = false, 0.1
     local privacy_elapsed = 1.0
+    local sos_elapsed = 1.9
+    local SOS_INTERVAL = 2.0
     -- Once Public is seen while a mission is live, keep spawn/corpse gated until
     -- back on the ship. Flipping Friends mid-mission used to re-enable writes into
     -- a live director and correlated with a hard crash (diag 20260926-182912).
     local privacy_sticky = false
-    local privacy_gated = false
+    local lobby_gated = false
     local function mission_live()
         if type(patch.in_mission) ~= 'function' then return false end
         local ok, yes = pcall(patch.in_mission, api, game)
@@ -372,12 +399,70 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         elseif not live then
             privacy_sticky = privacy.public
         end
-        privacy_gated = privacy.public or privacy_sticky
+        local privacy_gated = privacy.public or privacy_sticky
+
+        -- SOS probe: low-frequency while a mission is live and the lobby is not
+        -- already gated. After sticky/unsupported, scanning stops until ship
+        -- (sticky) or process exit (unsupported / build mismatch).
+        local sos_gated = false
+        local sos_reason = nil
+        if sos_probe then
+            if not live and sos_probe.sticky then
+                log_line('bb_sos_latch', 'cleared on ship')
+                sos_probe.reset_latch()
+            end
+            if sos_probe.unsupported then
+                sos_gated = true
+                sos_reason = (sos_probe.build == 'mismatch')
+                    and 'sos_probe_build_mismatch' or 'sos_probe_unreliable'
+            elseif sos_probe.sticky then
+                sos_gated = true
+                sos_reason = 'privacy_gate_sos'
+            else
+                local need_build = sos_probe.build == 'pending'
+                local scan = false
+                if need_build or (live and not privacy_gated) then
+                    sos_elapsed = sos_elapsed + 0.1
+                    if sos_elapsed >= SOS_INTERVAL then
+                        sos_elapsed = 0
+                        scan = true
+                    end
+                end
+                if scan then
+                    local ok, gated, reason, detail = pcall(sos_probe.probe, game, {
+                        live = live,
+                        refresh_build = need_build,
+                    })
+                    if not ok then
+                        sos_probe.unsupported = true
+                        sos_gated = true
+                        sos_reason = 'sos_probe_unreliable'
+                        log_line('bb_sos', 'probe_error ' .. tostring(gated))
+                    else
+                        local marker = tostring(detail or '')
+                        if marker ~= '' and marker ~= sos_probe._last_log then
+                            sos_probe._last_log = marker
+                            log_line('bb_sos', marker)
+                        end
+                        if gated then
+                            sos_gated = true
+                            sos_reason = reason
+                        end
+                    end
+                end
+            end
+        end
+
+        lobby_gated = privacy_gated or sos_gated
         local t0 = now_clock()
         local called, accepted, reason, active
-        if privacy_gated then
-            -- Public (or sticky after Public): do not write spawn multipliers.
-            called, accepted, reason, active = true, true, 'privacy_gate_public', false
+        if lobby_gated then
+            -- Public, SOS-spent, or SOS probe unavailable: do not write multipliers.
+            if privacy_gated then
+                called, accepted, reason, active = true, true, 'privacy_gate_public', false
+            else
+                called, accepted, reason, active = true, true, tostring(sos_reason or 'privacy_gate_sos'), false
+            end
         else
             called, accepted, reason, active = pcall(patch.apply, api, game)
         end
@@ -445,7 +530,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             end
         end
         check(dt)
-        if corpse and not privacy_gated then
+        if corpse and not lobby_gated then
             local stepped, reason = pcall(corpse.update, dt)
             if stepped and type(corpse.status) == 'function' then
                 local snapshot = corpse.status()

@@ -46,7 +46,8 @@ def main():
             'data-v22.5-panel-local': 'v22.5',
             'data-v23-panel-menus': 'v23',
         }
-        panel_like = ('data-v22-panel', 'data-v22-panel-blackbox', 'data-v22.5-panel-local', 'data-v23-panel-menus')
+        panel_like = ('data-v22-panel', 'data-v22-panel-blackbox', 'data-v22.5-panel-local',
+                      'data-v23-panel-menus')
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
@@ -68,7 +69,9 @@ def main():
             elif provenance['revision'] in panel_like:
                 expected_patrol_count = 1.0
                 expected_travelers_max_unit = (
-                    1.0 if provenance['revision'] in ('data-v22-panel-blackbox', 'data-v22.5-panel-local', 'data-v23-panel-menus') else 2.0)
+                    1.0 if provenance['revision'] in (
+                        'data-v22-panel-blackbox', 'data-v22.5-panel-local',
+                        'data-v23-panel-menus') else 2.0)
             expected_budget = 2.0 if provenance['revision'] in panel_like else 0.4
             assert change['budget_multiplier'] == expected_budget
             assert change['budget_override_multiplier'] == expected_budget
