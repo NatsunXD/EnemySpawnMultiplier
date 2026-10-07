@@ -152,7 +152,7 @@ VARIANTS['panel-local'] = dict(
 )
 VARIANTS['panel-menus'] = dict(
     VARIANTS['panel'],
-    revision='data-v23-panel-sosgate', public_version='v23-sosgate', version=23,
+    revision='data-v23-panel-menus', public_version='v23', version=23,
     name='Enemy Spawn Multiplier Panel',
     description=(
         'Panel build with privacy + SOS lobby gates. Skips spawn writes (and fast corpse decay) while '
