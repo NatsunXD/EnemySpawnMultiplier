@@ -45,13 +45,14 @@ def main():
             'data-v22-panel-blackbox': 'v22-blackbox',
             'data-v22.5-panel-local': 'v22.5',
             'data-v23-panel-menus': 'v23',
+            'data-v23hotfix-panel-menus': 'v23hotfix',
         }
         panel_like = ('data-v22-panel', 'data-v22-panel-blackbox', 'data-v22.5-panel-local',
-                      'data-v23-panel-menus')
+                      'data-v23-panel-menus', 'data-v23hotfix-panel-menus')
         assert provenance['revision'] in expected_versions
         assert provenance['display_version'] == expected_versions[provenance['revision']]
         assert provenance['runtime_verified'] is False
-        if provenance['revision'] == 'data-v23-panel-menus':
+        if provenance['revision'] in ('data-v23-panel-menus', 'data-v23hotfix-panel-menus'):
             assert provenance['shared_configuration'] == {
                 'f8': True, 'mods_menu_optional': True, 'languages': ['zh', 'en'],
                 'canonical_store': 'EnemySpawnMultiplier.cfg', 'mods_apply_batched': True,
@@ -71,7 +72,7 @@ def main():
                 expected_travelers_max_unit = (
                     1.0 if provenance['revision'] in (
                         'data-v22-panel-blackbox', 'data-v22.5-panel-local',
-                        'data-v23-panel-menus') else 2.0)
+                        'data-v23-panel-menus', 'data-v23hotfix-panel-menus') else 2.0)
             expected_budget = 2.0 if provenance['revision'] in panel_like else 0.4
             assert change['budget_multiplier'] == expected_budget
             assert change['budget_override_multiplier'] == expected_budget

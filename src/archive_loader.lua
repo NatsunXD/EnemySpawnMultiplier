@@ -271,9 +271,11 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
                 sos_probe = session
                 log_line('bb_sos', 'probe=ready interval=2s fail_closed_on_mismatch=1')
             else
+                sos_probe = {unsupported = true, build = 'error'}
                 log_line('bb_sos', 'probe=create_failed ' .. tostring(session))
             end
         else
+            sos_probe = {unsupported = true, build = 'error'}
             log_line('bb_sos', 'probe=module_failed ' .. tostring(module))
         end
     else
@@ -432,6 +434,9 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
                         refresh_build = need_build,
                     })
                     if not ok then
+                        sos_probe.unsupported = true
+                        sos_gated = true
+                        sos_reason = 'sos_probe_unreliable'
                         log_line('bb_sos', 'probe_error ' .. tostring(gated))
                     else
                         local marker = tostring(detail or '')

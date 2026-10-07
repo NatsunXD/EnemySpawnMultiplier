@@ -141,7 +141,7 @@ env.update(0.1)
 assert(patch.budget_multiplier==4.7 and saved.language=='zh' and saves==1)
 pass('loader restores cfg and applies MODS changes even when the F8 window fails')
 
--- Probe exceptions preserve availability; a confirmed SOS latch still gates.
+-- Probe failures must block both writers while preserving the previous update.
 local live, writes, decay_updates, scans = true, 0, 0, 0
 local gated_patch = {
     in_mission=function() return live end,
@@ -169,23 +169,22 @@ local thrown=start_gate(function() return {create=function() return {
     build='ok',probe=function() scans=scans+1; error('probe read failed') end,
 } end} end)
 for _=1,50 do assert(thrown.update(0.1)=='forwarded') end
-assert(scans>1 and writes==50 and decay_updates==50)
-assert(thrown.EnemySpawnMultiplier.status=='active')
-pass('throwing SOS probe preserves spawn and corpse updates and retries later')
+assert(scans==1 and writes==0 and decay_updates==0)
+assert(thrown.EnemySpawnMultiplier.status=='sos_probe_unreliable')
+pass('throwing SOS probe blocks spawn and corpse updates without retrying')
 
 for _, failing in ipairs({
     function() error('factory failed') end,
     function() return {create=function() error('session failed') end} end,
 }) do
     local failed=start_gate(failing)
-    local previous_writes, previous_decay= writes, decay_updates
     assert(failed.update(0.1)=='forwarded')
-    assert(writes==previous_writes+1 and decay_updates==previous_decay+1)
-    assert(failed.EnemySpawnMultiplier.status=='active')
+    assert(writes==0 and decay_updates==0)
+    assert(failed.EnemySpawnMultiplier.status=='sos_probe_unreliable')
 end
-pass('failed SOS initialization preserves writers and the update chain')
+pass('failed SOS initialization blocks writers and preserves the update chain')
 
-scans,writes,decay_updates=0,0,0
+scans=0
 local session={build='ok',sticky=false,unsupported=false}
 session.probe=function()
     scans=scans+1; session.sticky=true
