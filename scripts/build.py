@@ -157,11 +157,11 @@ VARIANTS['panel-menus'] = dict(
     description=(
         'Panel build with privacy + SOS lobby gates. Skips spawn writes (and fast corpse decay) while '
         'matchmaking privacy is Public, or after the host spends the SOS beacon (read-only stratagem-slot '
-        'probe; latched for the rest of that mission). Probe init/runtime errors and unknown game.dll PE '
-        'layouts fail closed until offsets are updated. SOS scan interval is 2s and stops after latch. F8 and '
-        'the optional MODS menu share applied settings and a saved Chinese/English language choice. Optional: '
-        'Mod Options Menu v1.1+ with Bingus Shared Loader v18+ for translated native settings. Requires the '
-        'official Bingus Shared Loader v15 or newer.'),
+        'probe; latched for the rest of that mission). Unknown game.dll PE layouts fail closed until offsets '
+        'are updated; probe init/runtime errors keep spawn writes available and retry. SOS scan interval is '
+        '2s and stops after latch. F8 and the optional MODS menu share applied settings and a saved '
+        'Chinese/English language choice. Optional: Mod Options Menu v1.1+ with Bingus Shared Loader v18+ for '
+        'translated native settings. Requires the official Bingus Shared Loader v15 or newer.'),
 )
 
 
