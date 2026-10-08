@@ -11,6 +11,20 @@ return function()
             budget='增援预算', patrol_count='巡逻数量', patrol_size='巡逻规模',
             encounter_cd='增援 CD', patrol_cd='巡逻 CD',
             fast_corpse='尸体快速消失（保留布娃娃）',
+            block_jumpers='屏蔽跳虫（追猎虫、猛扑虫及孢子变体）',
+            block_jumpers_desc='将追猎虫、猛扑虫及孢子追猎虫的已识别生成表资源替换为武斗虫；不删除在场敌人。',
+            block_yellow_spewers='屏蔽黄胖（哺育喷涌虫）',
+            block_yellow_spewers_desc='将哺育喷涌虫的生成表资源替换为武斗虫；不受小虫总开关控制。',
+            block_green_spewers='屏蔽绿胖（胆汁喷涌虫）',
+            block_green_spewers_desc='将胆汁喷涌虫两种难度变体的生成表资源替换为武斗虫；不受小虫总开关控制。',
+            block_bile_spitters='屏蔽小喷酸虫（胆汁喷吐虫）',
+            block_bile_spitters_desc='将胆汁喷吐虫及已确认的清道夫转换来源替换为武斗虫。',
+            block_scavengers='屏蔽普通小虫（清道夫及孢子变体）',
+            block_scavengers_desc='将普通及孢子清道夫的已识别生成表资源替换为武斗虫；支持低难度。',
+            block_shriekers='屏蔽飞行小虫（尖啸虫）',
+            block_shriekers_desc='将尖啸虫的已识别生成表资源替换为武斗虫；固定脚本等表外来源仍可能生成。',
+            block_all_small='屏蔽全部小虫（以上小虫改刷武斗虫）',
+            block_all_small_desc='启用跳虫、小喷酸虫、清道夫及尖啸虫替换，保留分项选择；关闭后按分项生效，黄胖和绿胖独立控制。',
             heavy='偏向重甲（重甲更多）', light_medium='偏向轻中甲（轻中甲更多）',
             native='原版（不改模板权重）', presets='模板预设',
             apply='应用', reset='重置', export='导出游戏日志', language_button='English',
@@ -34,6 +48,20 @@ return function()
             budget='Wave budget', patrol_count='Patrol count', patrol_size='Patrol size',
             encounter_cd='Reinf. CD', patrol_cd='Patrol CD',
             fast_corpse='Fast corpse decay (keep ragdolls)',
+            block_jumpers='Replace Hunters / Pouncers',
+            block_jumpers_desc='Replace known Hunter, Pouncer and Spore Burst Hunter rows with Warriors; existing enemies remain alive.',
+            block_yellow_spewers='Replace Nursing Spewers',
+            block_yellow_spewers_desc='Replace Nursing Spewer rows with Warriors. Separate from the all-small switch.',
+            block_green_spewers='Replace Bile Spewers',
+            block_green_spewers_desc='Replace both Bile Spewer tiers with Warriors. Separate from the all-small switch.',
+            block_bile_spitters='Replace Bile Spitters',
+            block_bile_spitters_desc='Replace Bile Spitters and confirmed Scavenger conversion sources with Warriors.',
+            block_scavengers='Replace Scavengers (including spores)',
+            block_scavengers_desc='Replace ordinary and Spore Burst Scavenger rows with Warriors, including at low difficulty.',
+            block_shriekers='Replace Shriekers',
+            block_shriekers_desc='Replace known Shrieker table rows with Warriors. Scripted or other table-external spawns may remain.',
+            block_all_small='Replace all small bugs with Warriors',
+            block_all_small_desc='Enable Hunter/Pouncer, Spitter, Scavenger and Shrieker replacement. Keep individual selections; Spewers remain separate.',
             heavy='Heavy units (more heavy enemies)', light_medium='Light / medium units',
             native='Vanilla (original template weights)', presets='Composition preset',
             apply='Apply', reset='Reset', export='Export game logs', language_button='中文',
@@ -65,7 +93,7 @@ return function()
 
     -- Width fits the full 'EnemySpawnMultiplier v22 by Natsun' title plus the
     -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 580, 500
+    M.CLIENT_W, M.CLIENT_H = 580, 696
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
     M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
@@ -81,10 +109,20 @@ return function()
     M.COOLDOWN_FAST, M.COOLDOWN_SLOW = 2.0, 30.0
     M.COOLDOWN_STEPS = 28 -- 1 s grid across 2 .. 30
 
+    M.BOOLEAN_FIELDS = {'fast_corpse',
+        'block_jumpers', 'block_yellow_spewers', 'block_green_spewers', 'block_bile_spitters', 'block_scavengers', 'block_shriekers', 'block_all_small'}
+
     local DEFAULTS = {
         budget = 2.0, patrol_count = 1.0, patrol_size = 1.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
         fast_corpse = true, language = 'zh',
+        block_jumpers = false,
+        block_yellow_spewers = false,
+        block_green_spewers = false,
+        block_bile_spitters = false,
+        block_scavengers = false,
+        block_shriekers = false,
+        block_all_small = false,
     }
 
     local SLIDER_LABELS = {
@@ -97,6 +135,13 @@ return function()
     -- Simple on/off rows rendered as checkboxes, below the sliders.
     local CHECKBOX_LABELS = {
         {key = 'fast_corpse'},
+        {key = 'block_jumpers'},
+        {key = 'block_yellow_spewers'},
+        {key = 'block_green_spewers'},
+        {key = 'block_bile_spitters'},
+        {key = 'block_scavengers'},
+        {key = 'block_shriekers'},
+        {key = 'block_all_small'},
     }
 
     local RADIO_LABELS = {
@@ -229,6 +274,13 @@ return function()
             encounter_cd_seconds = M.pending.encounter_cd,
             patrol_cd_seconds = M.pending.patrol_cd,
             fast_corpse = M.pending.fast_corpse,
+            block_jumpers = M.pending.block_jumpers,
+            block_yellow_spewers = M.pending.block_yellow_spewers,
+            block_green_spewers = M.pending.block_green_spewers,
+            block_bile_spitters = M.pending.block_bile_spitters,
+            block_scavengers = M.pending.block_scavengers,
+            block_shriekers = M.pending.block_shriekers,
+            block_all_small = M.pending.block_all_small,
             preset = M.pending.preset,
         }
     end
@@ -269,8 +321,8 @@ return function()
         M.pending.patrol_cd = M.cooldown_to_value(math.floor(
             (math.min(math.max(patrol_seconds, M.COOLDOWN_FAST), M.COOLDOWN_SLOW) - M.COOLDOWN_FAST)
             / (M.COOLDOWN_SLOW - M.COOLDOWN_FAST) * M.COOLDOWN_STEPS + 0.5))
-        if type(patch.fast_corpse) == 'boolean' then
-            M.pending.fast_corpse = patch.fast_corpse
+        for _, key in ipairs(M.BOOLEAN_FIELDS) do
+            if type(patch[key]) == 'boolean' then M.pending[key] = patch[key] end
         end
         if not patch.template_bias_enabled then
             M.pending.preset = 'native'
@@ -318,10 +370,11 @@ return function()
             local value = snap(settings[key])
             if value then M.pending[key] = value; changed = true end
         end
-        local fast_corpse = settings.fast_corpse
-        if type(fast_corpse) == 'boolean' then
-            M.pending.fast_corpse = fast_corpse
-            changed = true
+        for _, key in ipairs(M.BOOLEAN_FIELDS) do
+            if type(settings[key]) == 'boolean' then
+                M.pending[key] = settings[key]
+                changed = true
+            end
         end
         local preset = settings.preset
         if preset == 'heavy' or preset == 'light_medium' or preset == 'native' then

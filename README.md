@@ -24,6 +24,12 @@ F8 面板右下角的 English / 中文按钮即时切换语言；MODS 菜单也�
 
 任一界面应用配置后，都会将参数和语言保存到 `%LOCALAPPDATA%/EnemySpawnMultiplier.cfg`，下次启动时自动恢复，旧配置文件继续可用。ESM 配置文件优先于菜单自己的旧保存值；只有没有可用 ESM 配置文件时，才首次导入菜单保存值。
 
+### 虫种屏蔽（默认关闭）
+
+F8 面板和 MODS 菜单提供跳虫（追猎虫、猛扑虫及孢子变体）、黄胖（哺育喷涌虫）、绿胖（胆汁喷涌虫）、小喷酸虫（胆汁喷吐虫）、清道夫（含孢子变体）和尖啸虫六个分项，以及“屏蔽全部小虫”总开关。总开关合并跳虫、小喷酸虫、清道夫和尖啸虫；黄胖、绿胖始终独立。取消总开关后继续按原分项选择生效。修改后点击“应用 / APPLY”保存，两处界面同步，旧配置中的新选项默认关闭。
+
+自己作为任务主机、游戏构建受支持且符合现有非公开房间 / SOS 限制时，选中的生成表资源改用武斗虫；不删除已在场敌人。关闭选项或触发暂停条件后，恢复仍可安全访问且由本功能修改的资源。公开 / SOS 暂停沿用原版的回舰船解除规则；隐私配置无法确认时也暂停替换。固定脚本、已缓存资源等表外生成路径可能仍出现目标虫种，不能保证所有小虫完全消失。详见 [实现范围与验证](docs/ENEMY_FILTERS.md)。
+
 ## English
 
 Only the Panel version is maintained. Press F8 to open the configuration panel and adjust the reinforcement budget, patrol count, patrol size, reinforcement cooldown and patrol cooldown. Patrol size ranges from `0.1x` to `2.0x` and defaults to `1.0x`.
@@ -39,5 +45,11 @@ Diagnostics are appended to `%LOCALAPPDATA%/EnemySpawnMultiplier.log`. The panel
 Install the official [Bingus Shared Loader v15 or newer](https://github.com/CowboyBingus/BingusSharedLoader/releases), then install the single Panel package from the releases page.
 
 The Panel build saves the committed profile and language to `%LOCALAPPDATA%/EnemySpawnMultiplier.cfg` and restores them automatically on the next launch. This file takes priority over stale menu saves; the menu's saved values are imported only when there is no usable ESM profile.
+
+### Optional enemy replacement filters
+
+F8 and MODS expose six default-off filters: Hunters/Pouncers (including Spore Burst Hunters), Nursing Spewers, Bile Spewers, Bile Spitters, Scavengers (including spores), and Shriekers. An all-small switch combines Hunters/Pouncers, Spitters, Scavengers and Shriekers; both Spewer options remain separate. Turning the master off preserves individual selections. Apply saves and synchronizes both interfaces; older profiles start the new options disabled.
+
+On the mission host, on the supported build and under the existing private-lobby/SOS policy, selected spawn-table resources become Warriors. Existing enemies remain alive. Disabling a filter or gating the feature restores safely accessible resource bytes still owned by this feature. Public/SOS latches keep the upstream return-to-ship reset rule; unverified privacy also suspends replacement. Scripted, cached or other table-external spawns may remain, so this is not a guarantee that every target disappears. See [implementation and validation](docs/ENEMY_FILTERS.md).
 
 [Technical walkthrough](docs/TECHNICAL.md) | [Build instructions](CONTRIBUTING.md) | [Installation](INSTALL.txt) | [MIT License](LICENSE)

@@ -244,6 +244,8 @@ def main():
     tests += '\n' + run([LUA, TESTS / 'test_sos_probe.lua', SOURCE], env=env)
     if variant.get('panel', False):
         tests += '\n' + run([LUA, TESTS / 'test_corpse_clear.lua', SOURCE, build], env=env)
+        tests += '\n' + run([LUA, TESTS / 'test_enemy_filter.lua', SOURCE, build], env=env)
+        tests += '\n' + run([LUA, TESTS / 'test_enemy_filter_integration.lua', SOURCE, build], env=env)
     if os.name == 'nt':
         tests += '\n' + run([LUA, TESTS / 'test_windows_api.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_config_store.lua', SOURCE, build], env=env)
@@ -364,6 +366,10 @@ def main():
                          'identity_checked': True,
                          'decayer': {'component': 'CorpseDecayerComponent',
                                      'radius': 300.0, 'scan_interval_seconds': 0.5}},
+        'enemy_filter': {'default_enabled': False, 'host_only': True,
+                         'known_build_only': True, 'replacement': 'Warrior',
+                         'public_and_sos_latch': True, 'existing_enemies_removed': False,
+                         'all_spawn_paths_verified': False},
         'configuration_panel': bool(variant.get('panel', False)),
         'shared_configuration': {'f8': True, 'mods_menu_optional': True,
                                  'languages': ['zh', 'en'], 'canonical_store': 'EnemySpawnMultiplier.cfg',

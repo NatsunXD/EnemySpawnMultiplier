@@ -174,6 +174,11 @@ end
 --   curve up and, for reinforcements, clamps the pending deadline; the slow end
 --   restores the native curve and removes the clamp.
 -- preset is 'heavy', 'light_medium' or 'native'.
+local FILTER_KEYS = {
+    'block_jumpers', 'block_yellow_spewers', 'block_green_spewers', 'block_bile_spitters', 'block_scavengers', 'block_shriekers', 'block_all_small'
+}
+for _, key in ipairs(FILTER_KEYS) do patch[key] = false end
+
 function patch.configure(settings)
     if type(settings) ~= 'table' then return false, 'settings_not_a_table' end
     local next_budget = settings.budget
@@ -211,6 +216,11 @@ function patch.configure(settings)
     if next_fast_corpse ~= nil and type(next_fast_corpse) ~= 'boolean' then
         return false, 'fast_corpse_not_boolean'
     end
+    for _, key in ipairs(FILTER_KEYS) do
+        if settings[key] ~= nil and type(settings[key]) ~= 'boolean' then
+            return false, key .. '_not_boolean'
+        end
+    end
 
     if next_budget then
         patch.budget_multiplier = next_budget
@@ -240,6 +250,10 @@ function patch.configure(settings)
         -- field current even when the optional module is unavailable.
         if patch.corpse then patch.corpse.set_enabled(next_fast_corpse) end
         patch.fast_corpse = next_fast_corpse
+    end
+    if patch.enemy_filter then patch.enemy_filter.configure(settings) end
+    for _, key in ipairs(FILTER_KEYS) do
+        if settings[key] ~= nil then patch[key] = settings[key] end
     end
     if preset then
         local weights = patch.presets[preset]

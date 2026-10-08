@@ -14,6 +14,13 @@ return function(config, options)
         {key='patrol_cd', type='slider', min=2, max=30, step=1},
         {key='preset', type='choice', choices={'heavy','light_medium','native'}, label='presets'},
         {key='fast_corpse', type='toggle'},
+        {key='block_jumpers', type='toggle'},
+        {key='block_yellow_spewers', type='toggle'},
+        {key='block_green_spewers', type='toggle'},
+        {key='block_bile_spitters', type='toggle'},
+        {key='block_scavengers', type='toggle'},
+        {key='block_shriekers', type='toggle'},
+        {key='block_all_small', type='toggle'},
         {key='language', type='choice', choices={'chinese','english'}, values={'zh','en'}},
     }
     local function emit(kind, detail) pcall(log, kind, detail or '') end
@@ -94,7 +101,7 @@ return function(config, options)
             if not accepted then emit('mods_menu_saved_rejected', tostring(reason)) end
         end
         -- No outstanding user edits exist at startup, so settle every row once.
-        if push(config.current()) then emit('mods_menu_ready', '8 options; F8 and MODS share one profile') end
+        if push(config.current()) then emit('mods_menu_ready', #rows .. ' options; F8 and MODS share one profile') end
     end
     function M.pump(dt)
         if M.status == 'waiting' then
