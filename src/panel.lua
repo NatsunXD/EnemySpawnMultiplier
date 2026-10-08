@@ -32,8 +32,10 @@ return function(create_model, patch, callbacks)
     local bit = require('bit')
     if not ffi.abi('64bit') then return nil, 'panel_requires_windows_x64' end
 
+    -- Win32 returns signed SHORT. This shared declaration also affects addons
+    -- that check the pressed state with GetAsyncKeyState(key) < 0.
     ffi.cdef [[
-        int32_t GetAsyncKeyState(int32_t key);
+        int16_t GetAsyncKeyState(int32_t key);
         void *GetModuleHandleA(const char *name);
         void *GetForegroundWindow(void);
         uint32_t GetWindowThreadProcessId(void *window, uint32_t *pid);
@@ -109,7 +111,7 @@ return function(create_model, patch, callbacks)
         typedef struct { int32_t left, top, right, bottom; } ESP_RECT;
         typedef struct { int32_t x, y; } ESP_POINT;
 
-        typedef int32_t (*ESP_GetAsyncKeyState_t)(int32_t);
+        typedef int16_t (*ESP_GetAsyncKeyState_t)(int32_t);
         typedef void   *(*ESP_GetModuleHandleA_t)(const char *);
         typedef int32_t (*ESP_GetWindowThreadProcessId_t)(void *, uint32_t *);
         typedef uint32_t (*ESP_GetCurrentProcessId_t)(void);

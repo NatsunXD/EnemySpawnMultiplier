@@ -260,6 +260,8 @@ def main():
     tests += '\n' + run([LUA, TESTS / 'test_panel_paint.lua', SOURCE], env=env)
     if os.name == 'nt':
         tests += '\n' + run([LUA, TESTS / 'test_ffi_collision.lua', SOURCE], env=env)
+        for order in ('panel-first', 'peer-first', 'legacy-peer-first'):
+            tests += '\n' + run([LUA, TESTS / 'test_input_abi.lua', SOURCE, order], env=env)
     if os.name == 'nt':
         tests += '\n' + run([LUA, TESTS / 'test_panel_smoke.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_loader.lua', SOURCE, BUILD], env=env)
