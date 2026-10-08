@@ -23,9 +23,9 @@ assert(model.pending.preset == 'heavy')
 assert(model.pending.fast_corpse == true)
 pass('panel defaults to 2x budget, 1x patrol count, fast cooldowns and heavy')
 
--- Five sliders, one checkbox and three radios, in the documented order.
+-- Five sliders, eight checkboxes and three radios, in the documented order.
 local widgets = model.layout()
-assert(#widgets.sliders == 5 and #widgets.checkboxes == 1 and #widgets.radios == 3 and #widgets.buttons == 4)
+assert(#widgets.sliders == 5 and #widgets.checkboxes == 8 and #widgets.radios == 3 and #widgets.buttons == 4)
 assert(widgets.buttons[4].id == 'language')
 assert(widgets.checkboxes[1].key == 'fast_corpse' and #widgets.checkboxes[1].label > 0)
 assert(widgets.sliders[1].key == 'budget')
@@ -39,7 +39,7 @@ assert(type(widgets.buttons[3].label) == 'string' and #widgets.buttons[3].label 
 assert(widgets.radios[1].value == 'heavy')
 assert(widgets.radios[2].value == 'light_medium')
 assert(widgets.radios[3].value == 'native')
-pass('panel exposes five sliders, the corpse checkbox and three radios')
+pass('panel exposes five sliders, corpse/enemy checkboxes and three radios')
 
 -- Every label the panel paints must be present and non-empty.
 for _, control in ipairs(widgets.sliders) do

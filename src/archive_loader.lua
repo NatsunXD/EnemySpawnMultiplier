@@ -1,5 +1,5 @@
 return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors,
-                create_store, create_diag, create_corpse, create_config, create_options, create_sos)
+                create_store, create_diag, create_corpse, create_config, create_options, create_sos, create_filter)
     if _G.EnemySpawnMultiplier then return end
     local state = {revision = build.revision, active = false, status = '', detail = '', elapsed = 1.0}
     _G.EnemySpawnMultiplier = state
@@ -96,6 +96,8 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         return nil
     end
     local function read_privacy()
+        -- Do not reuse stale privacy as permission for new enemy replacements.
+        privacy.verified = false
         local appdata = os.getenv('APPDATA')
         if not appdata then return privacy end
         local directory = appdata .. '\\Arrowhead\\Helldivers2\\saves'
@@ -124,6 +126,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         local raw = tonumber(body:match('privacy_mode%s*=%s*(%-?%d+)'))
         privacy.path = path
         privacy.raw = raw
+        privacy.verified = raw == 0 or raw == 1 or raw == 2 or raw == 3
         if raw == nil then
             privacy.label, privacy.public = 'unknown', false
         elseif raw == PRIVACY_PUBLIC then
@@ -143,6 +146,9 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             string.format('game=%s', tostring(state.game_hash or '?')),
             string.format('status=%s', tostring(state.status or '')),
             string.format('active=%s', tostring(state.active)),
+            string.format('enemy_filter_allowed=%s', tostring(state.enemy_filter_allowed)),
+            string.format('enemy_filter=%s', tostring(state.enemy_filter
+                and state.enemy_filter.status().reason or 'unavailable')),
             string.format('upd_ms=%.2f', blackbox.last_upd_ms),
             string.format('upd_window_ms=%.2f', blackbox.window_ms),
             string.format('upd_window_calls=%d', blackbox.window_calls),
@@ -296,6 +302,43 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         end
     end
 
+    -- Construct before restoring the shared profile so saved selections reach
+    -- the filter even when neither UI is available.
+    local enemy_filter, filter_last_status = nil, nil
+    if create_filter and identity == 'known_build' then
+        local built, instance = pcall(create_filter, api, game)
+        if built and instance then
+            enemy_filter, patch.enemy_filter, state.enemy_filter = instance, instance, instance
+            instance.configure(patch)
+            log_line('enemy_filter_ready', 'replacement=Warrior default=off host_only=1')
+        else
+            log_line('enemy_filter_unavailable', tostring(instance))
+        end
+    elseif create_filter then
+        log_line('enemy_filter_unavailable', 'unsupported build; no filter writes')
+    end
+    local function update_filter(allowed)
+        if not enemy_filter then return end
+        local stepped, reason = pcall(enemy_filter.update, allowed)
+        if not stepped then
+            -- Try to restore owned rows; never propagate an optional feature
+            -- failure into the game updater or silently keep retrying it.
+            pcall(enemy_filter.update, false)
+            log_line('enemy_filter_disabled', tostring(reason))
+            enemy_filter, patch.enemy_filter, state.enemy_filter = nil, nil, nil
+            return
+        end
+        local snapshot = enemy_filter.status()
+        local marker = string.format('%s/%s/%s/%s/%s', tostring(allowed),
+            tostring(snapshot.reason), tostring(snapshot.blocked),
+            tostring(snapshot.restored), tostring(snapshot.source_swaps))
+        state.enemy_filter_allowed = allowed
+        if marker ~= filter_last_status then
+            filter_last_status = marker
+            log_line('enemy_filter_status', marker)
+        end
+    end
+
     -- Shared configuration is independent of the Win32 window: MODS and saved
     -- settings still work if the optional F8 panel cannot be created.
     local store, config, mods_menu = nil, nil, nil
@@ -371,10 +414,10 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         return ok and yes == true
     end
     local function check(dt)
-        if stopped then return end
         elapsed = elapsed + ((type(dt) == 'number' and dt == dt and dt > 0) and dt or 0)
         if elapsed < 0.1 then return end
         elapsed = 0
+        if stopped then update_filter(false); return end
         privacy_elapsed = privacy_elapsed + 0.1
         if privacy_elapsed >= 2.0 then
             privacy_elapsed = 0
@@ -449,6 +492,10 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         end
 
         lobby_gated = privacy_gated or sos_gated
+        -- Match the upstream Public/SOS latch; unknown privacy also fails closed.
+        -- update(false) only restores owned resource bytes, never deletes units.
+        local private = privacy.verified and (privacy.raw == 1 or privacy.raw == 2 or privacy.raw == 3)
+        update_filter(not lobby_gated and private)
         local t0 = now_clock()
         local called, accepted, reason, active
         if lobby_gated then
