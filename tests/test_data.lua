@@ -489,6 +489,17 @@ ffi.copy(resource_root + 15 * 16, resource_key, 8)
 put_u32(resource_root + 15 * 16 + 8, 1)
 selected = resource_root + 0x260 + patch.cfg_stride
 ffi.copy(selected, decoy, #decoy)
+local saved_resource_read=api.read
+local resource_size=0x260+patch.resource_slots*patch.cfg_stride
+api.read=function(address,size)
+    if real.distance(address,resource_root)==0 and size==resource_size then return nil end
+    return saved_resource_read(address,size)
+end
+local rejected,_,still_active=patch.apply(api,game)
+assert(rejected and still_active and real.distance(resource_root_live,resource_root)==0)
+assert(patch.detail:find('spawn_config_resource_clone_read_failed',1,true))
+api.read=saved_resource_read
+pass('unreadable complete resource snapshot is rejected without retargeting')
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_ready')
 selected = resource_root_live + 0x260 + patch.cfg_stride
@@ -501,7 +512,78 @@ assert(patch.apply(api, game) and writes == resource_writes)
 put_u32(handle + 8, 321)
 assert(patch.apply(api, game) and writes == resource_writes)
 pass('resource-key fallback resolves full 64-bit keys for invalid generation and hash misses')
+local original_resource_clone=resource_root_live
+local original_resource_bytes=ffi.string(resource_root_live,resource_size)
+local suspended=patch.suspend(api,game)
+assert(suspended>=1 and real.distance(resource_root_live,resource_root)==0)
+assert(ffi.string(original_resource_clone,resource_size)==original_resource_bytes,'suspend mutated retained clone')
+assert(patch.apply(api,game))
+assert(real.distance(resource_root_live,original_resource_clone)~=0,'old retained clone was recycled')
+pass('suspend restores owned resource slot and never rewrites a retained clone')
 
+-- In-place key/index changes must invalidate cached config identity.
+local cfg2=resource_root_live+0x260+2*patch.cfg_stride
+ffi.copy(cfg2,resource_root_live+0x260+patch.cfg_stride,patch.cfg_stride)
+put_u32(resource_root_live+15*16+8,2)
+assert(patch.apply(api,game))
+assert(patch.detail:find('cfg=resource:2',1,true),'cached row survived an index replacement')
+local other_key=string.char(201,205,171,137,103,69,35,241) -- same modulo-38 bucket
+ffi.copy(handle,other_key,8);ffi.copy(resource_root_live+15*16,other_key,8)
+assert(patch.apply(api,game))
+assert(patch.detail:find('cfg=resource:2',1,true),'handle key change was not re-resolved')
+ffi.copy(handle,resource_key,8);ffi.copy(resource_root_live+15*16,resource_key,8)
+put_u32(resource_root_live+15*16+8,1)
+assert(patch.apply(api,game))
+pass('resource cache follows in-place index and handle-key changes')
+
+local replaced_storage=ffi.new('uint8_t[?]',resource_size)
+local replaced_root=ffi.cast('uint8_t *',replaced_storage)
+ffi.copy(replaced_root,resource_root_live,resource_size)
+resource_root_live=replaced_root
+local before_replacement=writes
+assert(patch.suspend(api,game)==0 and writes==before_replacement,'suspend overwrote an engine-replaced root')
+assert(real.distance(resource_root_live,replaced_root)==0)
+assert(patch.apply(api,game))
+assert(real.distance(resource_root_live,replaced_root)~=0)
+pass('replaced root invalidates cache and is never overwritten by stale restoration')
+local valid_clone=resource_root_live
+local unreadable_storage=ffi.new('uint8_t[?]',resource_size)
+local unreadable_root=ffi.cast('uint8_t *',unreadable_storage)
+ffi.copy(unreadable_root,valid_clone,resource_size)
+resource_root_live=unreadable_root
+local complete_reads=0
+api.read=function(address,size)
+ if real.distance(address,unreadable_root)==0 and size==resource_size then complete_reads=complete_reads+1;return nil end
+ return saved_resource_read(address,size)
+end
+for _=1,12 do assert(patch.apply(api,game)) end
+assert(complete_reads==3 and real.distance(resource_root_live,unreadable_root)==0,'failed resource clone was retried without a limit')
+api.read=saved_resource_read;resource_root_live=valid_clone
+assert(patch.apply(api,game))
+pass('failed clone snapshots stop after three attempts per owner/root')
+
+local racing_storage=ffi.new('uint8_t[?]',resource_size)
+local racing_root=ffi.cast('uint8_t *',racing_storage)
+ffi.copy(racing_root,valid_clone,resource_size);resource_root_live=racing_root
+local snapshot_reads=0
+api.read=function(address,size)
+ local bytes=saved_resource_read(address,size)
+ if real.distance(address,racing_root)==0 and size==resource_size then
+  snapshot_reads=snapshot_reads+1
+  if snapshot_reads==2 then return bytes:sub(1,-2)..string.char((bytes:byte(-1)+1)%256) end
+ end
+ return bytes
+end
+assert(patch.apply(api,game))
+assert(real.distance(resource_root_live,racing_root)==0,'changed resource snapshot was published')
+assert(patch.detail:find('spawn_config_resource_changed_underneath',1,true))
+api.read=saved_resource_read;resource_root_live=valid_clone
+assert(patch.apply(api,game))
+pass('changing resource snapshot is rejected before pointer publication')
+
+
+
+resource_writes=writes
 ffi.fill(resource_root_live, 0x260, 0)
 ok, reason, active = patch.apply(api, game)
 assert(ok and active and reason == 'spawn_multiplier_partial' and writes == resource_writes)
@@ -549,6 +631,18 @@ assert(ok and active and writes == cloned_writes)
 assert(get_u32(cloned_entries + patch.max_offset) == 80)
 assert(get_f32(director + patch.points_offset) == 600)
 pass('module-image cap tables are cloned into private memory and scaled once')
+local retained_cap=ffi.string(cloned_header,patch.cap_header_size+3*patch.entry_stride)
+assert(patch.suspend(api,game)>=1)
+assert(real.distance(api.pointer(api.read(director+patch.cap_table_offset,8)),image)==0)
+assert(patch.apply(api,game))
+assert(ffi.string(cloned_header,patch.cap_header_size+3*patch.entry_stride)==retained_cap,
+ 'new retarget mutated a previously retained cap clone')
+put_ptr(director+patch.cap_table_offset,header)
+local before_stale_restore=writes
+patch.suspend(api,game)
+assert(writes==before_stale_restore,'stale cap ownership restored over a new native slot')
+pass('cap restoration checks slot ownership and retains old native-visible allocations')
+
 
 mission(vanilla, 100, 50)
 ok, reason, active = patch.apply(api, game)

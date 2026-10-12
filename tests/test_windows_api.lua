@@ -47,3 +47,9 @@ assert(api.writable_decay(exe_base, 4) == false,
 pass('writable_decay rejects null and module-image addresses')
 
 print(count .. ' Windows API checks passed; no game process involved.')
+
+local held=assert(api.read(address+8,4))
+for i=1,100 do assert(api.read(address,32)); assert(api.read(1,32)==nil) end
+assert(held==bytes and api.read(address+8,4)==bytes,'scratch reads mutated an earlier string or retained failure state')
+assert(api.read(address,0)==nil and api.read(address,-1)==nil and api.read(address,math.huge)==nil)
+print('PASS: bounded scratch buffers preserve returned strings and recover after read failures')

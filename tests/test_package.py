@@ -36,23 +36,21 @@ def main():
             assert zlib.crc32(png[offset + 4:end]) == int.from_bytes(png[end:end + 4], 'big')
             offset = end + 4
         assert offset == len(png)
-        expected_versions = {
-            'data-v22-native': 'v22',
-            'data-v22-light-medium': 'v22',
-            'data-v22-fast-cadence': 'v22',
-            'data-v22-preview-patrol-2x-3x': 'v22-preview',
-            'data-v22-panel': 'v22',
-            'data-v22-panel-blackbox': 'v22-blackbox',
-            'data-v22.5-panel-local': 'v22.5',
-            'data-v23-panel-menus': 'v23',
-            'data-v23hotfix-panel-menus': 'v23hotfix',
+        expected_revisions = {
+            'data-v23-native', 'data-v23-light-medium', 'data-v23-fast-cadence',
+            'data-v23-preview-patrol-2x-3x', 'data-v23-panel-menus',
         }
-        panel_like = ('data-v22-panel', 'data-v22-panel-blackbox', 'data-v22.5-panel-local',
-                      'data-v23-panel-menus', 'data-v23hotfix-panel-menus')
-        assert provenance['revision'] in expected_versions
-        assert provenance['display_version'] == expected_versions[provenance['revision']]
+        panel_like = ('data-v23-panel-menus',)
+        assert provenance['revision'] in expected_revisions
+        assert provenance['display_version'] == 'v23'
+        assert Path(sys.argv[1]).name == provenance['name'].replace(' ', '-') + '-v23.zip'
         assert provenance['runtime_verified'] is False
-        if provenance['revision'] in ('data-v23-panel-menus', 'data-v23hotfix-panel-menus'):
+        if provenance['revision'] in panel_like:
+            budget=provenance['performance_budget']
+            assert budget['log_queue_bytes']==16384 and budget['log_queue_lines']==32
+            assert budget['log_flush_seconds']==5 and budget['blackbox_summary_seconds']==30
+            assert budget['clone_retention_bytes']==8388608 and budget['runtime_verified'] is False
+        if provenance['revision'] in panel_like:
             assert provenance['shared_configuration'] == {
                 'f8': True, 'mods_menu_optional': True, 'languages': ['zh', 'en'],
                 'canonical_store': 'EnemySpawnMultiplier.cfg', 'mods_apply_batched': True,
@@ -62,17 +60,14 @@ def main():
             assert menu_dependency['minimum_version'] == '1.1' and menu_dependency['bingus_minimum_version'] == 18
         change = provenance.get('data_change')
         assert change is not None
-        if provenance['revision'] in ('data-v22-fast-cadence', 'data-v22-preview-patrol-2x-3x',
+        if provenance['revision'] in ('data-v23-fast-cadence', 'data-v23-preview-patrol-2x-3x',
                                       *panel_like):
             expected_patrol_count, expected_travelers_max_unit = (6.0, 6.0)
-            if provenance['revision'] == 'data-v22-preview-patrol-2x-3x':
+            if provenance['revision'] == 'data-v23-preview-patrol-2x-3x':
                 expected_patrol_count, expected_travelers_max_unit = 2.0, 3.0
             elif provenance['revision'] in panel_like:
                 expected_patrol_count = 1.0
-                expected_travelers_max_unit = (
-                    1.0 if provenance['revision'] in (
-                        'data-v22-panel-blackbox', 'data-v22.5-panel-local',
-                        'data-v23-panel-menus', 'data-v23hotfix-panel-menus') else 2.0)
+                expected_travelers_max_unit = 1.0
             expected_budget = 2.0 if provenance['revision'] in panel_like else 0.4
             assert change['budget_multiplier'] == expected_budget
             assert change['budget_override_multiplier'] == expected_budget

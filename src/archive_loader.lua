@@ -18,34 +18,54 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         alerts = 0,
     }
 
+    -- Blackbox budget: <=32 lines / 16 KiB queued, one batch per 5 seconds,
+    -- <=4 alerts per 5 seconds, summaries every 30 seconds. No per-frame
+    -- formatting, sorting, memory walking or file handles for diagnostics.
+    local LOG_INTERVAL, SUMMARY_INTERVAL = 5.0, 30.0
+    local LOG_LINES, LOG_BYTES = 32, 16*1024
+    local log_queue, log_bytes, log_elapsed, dropped = {}, 0, 0, 0
+    local diagnostic_time, alert_window, alert_count = 0, 0, 0
+    local alerts_by_reason = {}
+    blackbox.total_ms, blackbox.max_ms, blackbox.calls = 0, 0, 0
+    blackbox.summary_elapsed, blackbox.window_elapsed = 0, 0
+    blackbox.suppressed, blackbox.dropped = 0, 0
+    blackbox.log_batches, blackbox.clock_calls = 0, 0
+    state.blackbox = blackbox
     local function log_line(status, detail)
-        -- Callers may omit the detail. It is concatenated below, so normalise it
-        -- here rather than letting a nil raise inside the panel's mouse handler,
-        -- where the fault would propagate into the updater hook.
-        status, detail = tostring(status or ''), tostring(detail or '')
-        local directory = os.getenv('LOCALAPPDATA')
-        if not directory then return end
-        local path = directory .. '/EnemySpawnMultiplier.log'
-        local file = io.open(path, 'a')
-        if not file then return end
-        local size = file:seek('end') or 0
-        if size > LOG_LIMIT then
-            file:close()
-            os.remove(path .. '.1')
-            os.rename(path, path .. '.1')
-            file = io.open(path, 'a')
-            if not file then return end
-            file:write(build.revision .. '\n')
-        elseif size == 0 then
-            file:write(build.revision .. '\n')
-        end
-        local stamp = type(os.date) == 'function' and os.date('%H:%M:%S') or 't'
-        file:write(stamp .. ' ' .. status .. ' ' .. detail .. '\n')
-        file:close()
+        if #log_queue >= LOG_LINES then dropped=dropped+1; blackbox.dropped=dropped; return end
+        local line = tostring(status or ''):sub(1,80) .. ' ' .. tostring(detail or ''):sub(1,900) .. '\n'
+        if log_bytes+#line > LOG_BYTES then dropped=dropped+1; blackbox.dropped=dropped; return end
+        log_queue[#log_queue+1], log_bytes = line, log_bytes+#line
     end
-    -- Exposed for diagnostics and so the writer's own contract can be tested
-    -- against the shipped implementation rather than a reimplementation.
-    state.log = log_line
+    local function flush_log()
+        if #log_queue == 0 then return end
+        local directory = os.getenv('LOCALAPPDATA')
+        if not directory then log_queue,log_bytes={},0; return end
+        local path = directory .. '/EnemySpawnMultiplier.log'
+        -- Detach first: failures cannot cause an unbounded retry queue.
+        local queued = log_queue
+        log_queue, log_bytes = {}, 0
+        local file
+        local ok = pcall(function()
+            file = io.open(path,'a')
+            if not file then return end
+            local size = file:seek('end') or 0
+            if size > LOG_LIMIT then
+                file:close(); file=nil
+                os.remove(path..'.1'); os.rename(path,path..'.1')
+                file=io.open(path,'a'); size=0
+            end
+            if not file then return end
+            if size==0 then file:write(build.revision .. '\n') end
+            local stamp = type(os.date)=='function' and os.date('%H:%M:%S') or 't'
+            for i,line in ipairs(queued) do queued[i]=stamp..' '..line end
+            file:write(table.concat(queued))
+        end)
+        if file then pcall(file.close,file) end
+        blackbox.log_batches=blackbox.log_batches+1
+        if not ok then dropped=dropped+#queued end
+    end
+    state.log, state.flush_log = log_line, flush_log
 
     -- Matchmaking privacy from the account settings file (Options → Gameplay →
     -- Matchmaking Privacy). privacy_mode 0 = Public; any other value is treated
@@ -171,6 +191,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         if not diag or type(diag.export) ~= 'function' then
             return nil, 'diag_unavailable'
         end
+        flush_log() -- explicit user export may flush ahead of the periodic batch
         local folder, name_or_err = diag.export(diag_snapshot())
         if not folder then
             log_line('bb_export_failed', tostring(name_or_err))
@@ -183,17 +204,32 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
 
     local function bb_alert(reason, detail)
         blackbox.alerts = blackbox.alerts + 1
-        log_line('bb_alert', tostring(reason) .. ' ' .. tostring(detail or ''))
+        -- Key on reason, not fluctuating measurements. Global cap also bounds
+        -- alternating fault categories; state is fixed to internal reason keys.
+        if diagnostic_time-alert_window >= LOG_INTERVAL then
+            alert_window, alert_count = diagnostic_time, 0
+        end
+        if alert_count >= 4 or (alerts_by_reason[reason] and diagnostic_time-alerts_by_reason[reason]<LOG_INTERVAL) then
+            blackbox.suppressed=blackbox.suppressed+1
+            return
+        end
+        alerts_by_reason[reason], alert_count = diagnostic_time, alert_count+1
+        log_line('bb_alert',tostring(reason)..' '..(type(detail)=='number' and string.format('ms=%.2f',detail) or tostring(detail or '')))
     end
 
+    local last_console = -LOG_INTERVAL
     local function report(status, active, dt, perf_suffix)
         state.active = active
         local detail = type(patch.detail) == 'string' and patch.detail or ''
         local changed = state.status ~= status
+        state.detail = detail -- export current values without treating them as a transition
         if not changed then return end
         state.elapsed = 0
         state.status, state.detail = status, detail
-        print('[EnemySpawnMultiplier] ' .. build.revision .. ': ' .. status .. (detail ~= '' and (' ' .. detail) or ''))
+        if diagnostic_time-last_console >= LOG_INTERVAL then
+            last_console=diagnostic_time
+            print('[EnemySpawnMultiplier] ' .. build.revision .. ': ' .. status .. (detail ~= '' and (' ' .. detail) or ''))
+        end
         -- Performance samples are diagnostic data, not state identity. Including
         -- the changing `upd_ms/win_ms` suffix in `state.detail` made every 0.1 s
         -- update look like a state transition and opened/appended/closed the log
@@ -201,7 +237,8 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         -- sample only to the already-throttled log write.
         local logged_detail = detail
         if perf_suffix and perf_suffix ~= '' then
-            logged_detail = (logged_detail ~= '' and (logged_detail .. ' ' .. perf_suffix) or perf_suffix)
+            local sample=type(perf_suffix)=='number' and string.format('patch_ms=%.2f',perf_suffix) or perf_suffix
+            logged_detail = (logged_detail ~= '' and (logged_detail .. ' ' .. sample) or sample)
         end
         pcall(log_line, status, logged_detail)
     end
@@ -237,7 +274,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     state.build = identity
     state.exe_hash, state.game_hash = exe_hash, game_hash
     log_line(identity, string.format('exe=%s game=%s', exe_hash, game_hash))
-    log_line('bb_ready', 'blackbox=on export=panel_or_bat')
+    log_line('bb_ready', 'blackbox=on summary_s=30 flush_s=5 queue=32/16384 alerts=4/5s')
 
     -- Anchor probe: confirms the pinned data slots still look like what the patch
     -- expects. This is the replacement for the hash gate. A failure does not stop
@@ -319,7 +356,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     -- patch must keep running even if no window can be created.
     local panel = nil
     if create_panel then
-        local panel_version = tostring(build.revision):match('v[%d%.]+') or 'v22'
+        local panel_version = tostring(build.revision):match('v[%d%.]+') or 'v23'
         -- The bindings bridge is optional and independent of the panel: if the
         -- Mod Bindings Menu addon is absent the provider simply never becomes
         -- ready and the panel keeps its built-in F8 default.
@@ -350,6 +387,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
 
     local function now_clock()
         if type(os) == 'table' and type(os.clock) == 'function' then
+            blackbox.clock_calls=blackbox.clock_calls+1
             return os.clock()
         end
         return 0
@@ -463,12 +501,6 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         end
         local upd_ms = (now_clock() - t0) * 1000.0
         blackbox.last_upd_ms = upd_ms
-        local now = now_clock()
-        if blackbox.window_start == 0 or (now - blackbox.window_start) >= 1.0 then
-            blackbox.window_start, blackbox.window_ms, blackbox.window_calls = now, 0, 0
-        end
-        blackbox.window_ms = blackbox.window_ms + upd_ms
-        blackbox.window_calls = blackbox.window_calls + 1
         if not called then reason, accepted, active = tostring(accepted), false, false end
         reason = tostring(reason or '')
 
@@ -502,20 +534,31 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             or reason:find('changed_underneath', 1, true) then
             bb_alert('write_fault', reason)
         end
-        if upd_ms >= PERF_SINGLE_MS then
-            bb_alert('upd_slow', string.format('upd_ms=%.2f', upd_ms))
-        elseif blackbox.window_ms >= PERF_WINDOW_MS and blackbox.window_calls > 0 then
-            bb_alert('upd_window_heavy', string.format(
-                'window_ms=%.2f calls=%d', blackbox.window_ms, blackbox.window_calls))
-            -- Reset the window so a sustained load does not spam every tick.
-            blackbox.window_start, blackbox.window_ms, blackbox.window_calls = now, 0, 0
-        end
-
-        local perf = string.format('upd_ms=%.2f win_ms=%.2f', upd_ms, blackbox.window_ms)
         if not accepted then stopped = true end
-        report(reason, active == true, dt, perf)
+        report(reason, active == true, dt, upd_ms)
     end
+    local function sample_component_gate()
+        -- Two guarded reads per 30-second summary, on the pinned build only.
+        -- This is diagnostic data; it never changes native admission decisions.
+        if state.build~='known_build' or type(api.read)~='function' or type(api.pointer)~='function' then return nil end
+        local ok,value=pcall(function()
+            local manager=api.pointer(api.read(game+0x33264D8,8))
+            if not manager then return nil end
+            local bytes=api.read(manager+0x0c,4)
+            if not bytes or #bytes~=4 then return nil end
+            local a,b,c,d=bytes:byte(1,4)
+            return a+b*256+c*65536+d*16777216
+        end)
+        return ok and value or nil
+    end
+
+    local corpse_status_elapsed, corpse_snapshot = 0, nil
+    local suspended = false
     local function forward(dt, ...)
+        local started = now_clock() -- previous() has already returned
+        local delta = type(dt)=='number' and dt==dt and dt>0 and math.min(dt,1) or 0
+        diagnostic_time, log_elapsed = diagnostic_time+delta, log_elapsed+delta
+        corpse_status_elapsed = corpse_status_elapsed+delta
         if mods_menu then
             local pumped, reason = pcall(mods_menu.pump, dt)
             if not pumped then
@@ -525,15 +568,19 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             end
         end
         check(dt)
+        if lobby_gated and not suspended and type(patch.suspend)=='function' then
+            pcall(patch.suspend,api,game)
+            suspended=true
+        elseif not lobby_gated then suspended=false end
         if corpse and not lobby_gated then
             local stepped, reason = pcall(corpse.update, dt)
-            if stepped and type(corpse.status) == 'function' then
+            if stepped and corpse_status_elapsed >= 0.5 and type(corpse.status) == 'function' then
+                corpse_status_elapsed = 0
                 local snapshot = corpse.status()
-                local marker = string.format('%s/%s/%s/%s/%s/%s/%s/%s',
-                    tostring(snapshot.mode), tostring(snapshot.located),
-                    tostring(snapshot.applied), tostring(snapshot.already),
-                    tostring(snapshot.skipped), tostring(snapshot.dynamic_candidates),
-                    tostring(snapshot.decayer_applied), tostring(snapshot.decayer_already))
+                corpse_snapshot = snapshot
+                local marker = table.concat({tostring(snapshot.enabled),tostring(snapshot.mode),
+                    tostring(snapshot.located),tostring(snapshot.epoch),
+                    tostring(snapshot.reason):match('^[^ :=]+') or ''},'/')
                 if marker ~= corpse_last_status then
                     corpse_last_status = marker
                     local probes = type(snapshot.header_probes) == 'table'
@@ -583,6 +630,40 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
                 panel, state.panel = nil, nil
             end
         end
+        blackbox.summary_elapsed = blackbox.summary_elapsed+delta
+        if blackbox.summary_elapsed >= SUMMARY_INTERVAL then
+            blackbox.summary_elapsed=0
+            blackbox.component_gate_count=sample_component_gate()
+            log_line('bb_summary',string.format(
+                'total_avg_ms=%.3f total_max_ms=%.3f calls=%d patch_ms=%.3f suppressed=%d dropped=%d corpse=%s/%s/%s clone_bytes=%s components=%s/448',
+                blackbox.total_ms/math.max(1,blackbox.calls),blackbox.max_ms,blackbox.calls,
+                blackbox.last_upd_ms,blackbox.suppressed,dropped,
+                tostring(corpse_snapshot and corpse_snapshot.applied or 0),
+                tostring(corpse_snapshot and corpse_snapshot.already or 0),
+                tostring(corpse_snapshot and corpse_snapshot.skipped or 0),
+                tostring(patch.diag and patch.diag.retained_clone_bytes or 0),
+                tostring(blackbox.component_gate_count or 'unavailable')))
+            blackbox.total_ms,blackbox.max_ms,blackbox.calls=0,0,0
+        end
+        if log_elapsed >= LOG_INTERVAL then
+            log_elapsed=0
+            flush_log()
+        end
+        local total_ms=math.max(0,(now_clock()-started)*1000)
+        blackbox.last_total_ms=total_ms
+        blackbox.total_ms=blackbox.total_ms+total_ms
+        blackbox.max_ms=math.max(blackbox.max_ms,total_ms)
+        blackbox.calls=blackbox.calls+1
+        blackbox.window_ms=blackbox.window_ms+total_ms
+        blackbox.window_elapsed=blackbox.window_elapsed+delta
+        if total_ms>=PERF_SINGLE_MS then bb_alert('total_slow',total_ms) end
+        if blackbox.window_elapsed>=1 then
+            if blackbox.window_ms>=PERF_WINDOW_MS then
+                bb_alert('total_window_heavy',blackbox.window_ms)
+            end
+            blackbox.window_ms,blackbox.window_elapsed=0,0
+        end
+        blackbox.dropped=dropped
         return ...
     end
     update = function(dt, ...)

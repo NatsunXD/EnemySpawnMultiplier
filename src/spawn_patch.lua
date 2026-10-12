@@ -25,6 +25,8 @@ local patch = {
     traveler_cooldown_min = 0,
     traveler_cooldown_max = 0,
     -- MissionDifficultySettings modifier curves inside the same 0x43C row.
+    -- These fields live in MissionDifficultySettings, embedded at cfg+0x88
+    -- inside HiveMindComponent. Offsets below are relative to the complete cfg.
     -- Each block is 15 floats (5 + 4 + 1 + 5) blended per difficulty/progress by
     -- game.dll+0xFE5280. A value of 0 disables that block. Fields whose name
     -- contains _rate_ are frequency multipliers; cooldown shrinks as they grow.
@@ -268,6 +270,8 @@ end
 local originals = {}
 local clones = {block = nil, size = 0}
 local resource_clone = {source = nil, block = nil, size = 0}
+local config_cache, hash_cache = nil, nil
+local resource_attempt = nil
 -- Lightweight diagnostics surface read by the loader blackbox. Fields are
 -- overwritten in place so archive_loader can sample them without parsing detail.
 patch.diag = {
@@ -337,6 +341,8 @@ local function reset()
     mission.guardforce_original, mission.guardforce_applied = nil, nil
     mission.cfg, mission.weights = nil, nil
     mission.cfg_address = nil
+    config_cache,hash_cache = nil,nil
+    override_state, modifier_state = {}, {}
 end
 local function same_pointer(api, first, second)
     return first and second and api.distance(first, second) == 0
@@ -393,15 +399,27 @@ local function describe(points, original, valid, count, timers, pop, cfg,
     patch.detail = patch.detail .. string.format(' tv=%.1f-%.1f',
         cfg and cfg.traveler_min or 0, cfg and cfg.traveler_max or 0)
 end
+-- Native code may retain old objects, so no clone is recycled/freed. Keep
+-- this deliberate retention bounded for long sessions and fail closed at limit.
+local retained_clone_bytes, CLONE_RETENTION_LIMIT = 0, 8*1024*1024
+local function allocate_clone(api,size)
+    if retained_clone_bytes+size > CLONE_RETENTION_LIMIT then return nil end
+    local block=api.alloc_private(size)
+    if block then retained_clone_bytes=retained_clone_bytes+size end
+    patch.diag.retained_clone_bytes=retained_clone_bytes
+    return block
+end
 local function retarget_table(api, director, table_bytes, rows, table_size)
     ffi = ffi or require('ffi')
     local size = patch.cap_header_size + table_size
-    if not clones.block or clones.size < size then
-        clones.block = api.alloc_private(size)
-        clones.size = clones.block and size or 0
-        if not clones.block then return nil, 'spawn_clone_alloc_failed' end
+    local owner = api.read(director+patch.cap_table_offset,8)
+    local source = owner and api.pointer(owner)
+    if not source or api.read(source,patch.cap_header_size) ~= table_bytes
+        or api.read(api.pointer(table_bytes),table_size) ~= rows then
+        return nil, 'spawn_cap_changed_underneath'
     end
-    local block = clones.block
+    local block = allocate_clone(api,size)
+    if not block then return nil, 'spawn_clone_alloc_failed' end
     local copy = block + patch.cap_header_size
     ffi.copy(copy, rows, table_size)
     ffi.copy(block, table_bytes, patch.cap_header_size)
@@ -409,6 +427,13 @@ local function retarget_table(api, director, table_bytes, rows, table_size)
     if not api.writable_data(block, size) then
         return nil, 'spawn_clone_not_writable_private_data'
     end
+    if not same_pointer(api,api.pointer(api.read(director+patch.cap_table_offset,8)),source)
+        or api.read(source,patch.cap_header_size) ~= table_bytes
+        or api.read(api.pointer(table_bytes),table_size) ~= rows then
+        return nil, 'spawn_cap_changed_underneath'
+    end
+    clones = {block=block,size=size,owner=director,source=source,header=table_bytes,
+        rows=rows,entries=api.pointer(table_bytes)}
     if not api.write(director + patch.cap_table_offset, pack_ptr(block))
         or not same_pointer(api, api.pointer(api.read(director + patch.cap_table_offset, 8)), block) then
         return nil, 'spawn_cap_retarget_failed'
@@ -417,56 +442,76 @@ local function retarget_table(api, director, table_bytes, rows, table_size)
 end
 local function ensure_resource_clone(api, game, manager, root)
     local size = 0x260 + patch.resource_slots * patch.cfg_stride
-    if resource_clone.block and resource_clone.size >= size then
-        if same_pointer(api, resource_clone.block, root) then
-            patch.diag.resource_clone_active = true
-            patch.diag.resource_clone_size = resource_clone.size
-            return resource_clone.block
-        end
-        if same_pointer(api, resource_clone.source, root) then
-            if not api.writable_data(manager + patch.resource_table_offset, 8) then
-                patch.diag.last_clone_event = 'retarget_not_writable'
-                return nil, 'spawn_config_resource_table_not_writable_private_data'
-            end
-            if api.write(manager + patch.resource_table_offset, pack_ptr(resource_clone.block))
-                and same_pointer(api, api.pointer(api.read(manager + patch.resource_table_offset, 8)), resource_clone.block) then
-                patch.diag.resource_clone_active = true
-                patch.diag.resource_clone_size = resource_clone.size
-                patch.diag.resource_clone_events = patch.diag.resource_clone_events + 1
-                patch.diag.last_clone_event = 'retarget'
-                return resource_clone.block
-            end
-            patch.diag.last_clone_event = 'retarget_failed'
-            return nil, 'spawn_config_resource_retarget_failed'
-        end
+    if resource_clone.block and same_pointer(api,resource_clone.manager,manager)
+        and same_pointer(api,resource_clone.block,root) then
+        patch.diag.resource_clone_active = true
+        return resource_clone.block
     end
-    if not api.writable_data(manager + patch.resource_table_offset, 8) then
-        patch.diag.last_clone_event = 'clone_not_writable'
-        return nil, 'spawn_config_resource_table_not_writable_private_data'
+    if resource_attempt and same_pointer(api,resource_attempt.manager,manager)
+        and same_pointer(api,resource_attempt.root,root) then
+        if resource_attempt.count>=3 then return nil,'spawn_config_resource_retry_limit' end
+        resource_attempt.count=resource_attempt.count+1
+    else resource_attempt={manager=manager,root=root,count=1} end
+    if not api.writable_data(manager+patch.resource_table_offset,8) then
+        patch.diag.last_clone_event='clone_not_writable'
+        return nil,'spawn_config_resource_table_not_writable_private_data'
+    end
+    local bytes = api.read(root,size)
+    if not bytes or #bytes ~= size then
+        patch.diag.last_clone_event='copy_failed'
+        return nil,'spawn_config_resource_clone_read_failed'
     end
     ffi = ffi or require('ffi')
-    local block = api.alloc_private(size)
+    local block = allocate_clone(api,size)
     if not block then
         patch.diag.last_clone_event = 'alloc_failed'
         return nil, 'spawn_config_resource_clone_alloc_failed'
     end
-    local ok = pcall(ffi.copy, block, root, size)
-    if not ok then
-        patch.diag.last_clone_event = 'copy_failed'
-        return nil, 'spawn_config_resource_clone_read_failed'
+    ffi.copy(block,bytes,size) -- stable Lua snapshot, never a raw game pointer
+    if not same_pointer(api,api.pointer(api.read(game+patch.resource_manager_rva,8)),manager)
+        or not same_pointer(api,api.pointer(api.read(manager+patch.resource_table_offset,8)),root)
+        or api.read(root,size) ~= bytes then
+        patch.diag.last_clone_event='source_changed'
+        return nil,'spawn_config_resource_changed_underneath'
     end
+    resource_clone = {source=root,block=block,size=size,manager=manager,snapshot=bytes}
     if not api.write(manager + patch.resource_table_offset, pack_ptr(block))
         or not same_pointer(api, api.pointer(api.read(manager + patch.resource_table_offset, 8)), block) then
         patch.diag.last_clone_event = 'retarget_failed'
         return nil, 'spawn_config_resource_retarget_failed'
     end
-    resource_clone.source, resource_clone.block, resource_clone.size = root, block, size
     patch.diag.resource_clone_active = true
     patch.diag.resource_clone_size = size
     patch.diag.resource_clone_events = patch.diag.resource_clone_events + 1
     patch.diag.last_clone_event = 'cloned'
+    resource_attempt=nil
     return block
 end
+function patch.suspend(api,game)
+    local restored = 0
+    local director = api.pointer(api.read(game+patch.director_rva,8))
+    if clones.owner and same_pointer(api,director,clones.owner)
+        and same_pointer(api,api.pointer(api.read(director+patch.cap_table_offset,8)),clones.block)
+        and api.read(clones.source,patch.cap_header_size)==clones.header
+        and api.read(clones.entries,#clones.rows)==clones.rows then
+        if api.write(director+patch.cap_table_offset,pack_ptr(clones.source))
+            and same_pointer(api,api.pointer(api.read(director+patch.cap_table_offset,8)),clones.source) then restored=restored+1 end
+    end
+    local manager = api.pointer(api.read(game+patch.resource_manager_rva,8))
+    if resource_clone.manager and same_pointer(api,manager,resource_clone.manager)
+        and same_pointer(api,api.pointer(api.read(manager+patch.resource_table_offset,8)),resource_clone.block)
+        and api.read(resource_clone.source,resource_clone.size)==resource_clone.snapshot then
+        if api.write(manager+patch.resource_table_offset,pack_ptr(resource_clone.source))
+            and same_pointer(api,api.pointer(api.read(manager+patch.resource_table_offset,8)),resource_clone.source) then
+            restored=restored+1
+            patch.diag.resource_clone_active=false
+            patch.diag.last_clone_event='restored'
+        end
+    end
+    reset()
+    return restored
+end
+
 local function scale_points(api, director, points, budget)
     if not (points > 0) then return true end
     if not mission.points_original then
@@ -610,10 +655,11 @@ local function scale_candidate_weights(api, director)
     end
     mission.weights = mission.weights or {}
     local candidates, densities = {}, {}
+    local pool = api.read(base, size)
+    if not pool then return 0, count, 'spawn_candidate_unreadable' end
     for index = 0, count - 1 do
         local address = base + index * patch.candidate_stride
-        local bytes = api.read(address, patch.candidate_stride)
-        if not bytes then return 0, count, 'spawn_candidate_unreadable' end
+        local bytes = pool:sub(index*patch.candidate_stride+1,(index+1)*patch.candidate_stride)
         local source = api.pointer(bytes, patch.candidate_template_offset)
         local weight = number(bytes, patch.candidate_weight_offset)
         local cost = number(bytes, patch.candidate_cost_offset)
@@ -689,9 +735,6 @@ local function scale_modifier_block(api, address, offset, scale, label)
     if scale < 0.05 or scale > 50 then
         return nil, label .. '_scale_out_of_range'
     end
-    if not api.writable_data(address + offset, MODIFIER_BLOCK_SIZE * 4) then
-        return nil, label .. '_not_writable_private_data'
-    end
     -- cdata pointers are not reliable table keys here; the existing override
     -- state uses the string form for the same reason.
     local state_key = tostring(address)
@@ -699,10 +742,10 @@ local function scale_modifier_block(api, address, offset, scale, label)
     if not store then store = {}; modifier_state[state_key] = store end
     local saved = store[offset]
     local current = {}
+    local bytes = api.read(address + offset, MODIFIER_BLOCK_SIZE * 4)
+    if not bytes then return nil, label .. '_unreadable' end
     for index = 0, MODIFIER_BLOCK_SIZE - 1 do
-        local bytes = api.read(address + offset + index * 4, 4)
-        if not bytes then return nil, label .. '_unreadable' end
-        current[index] = number(bytes, 0)
+        current[index] = number(bytes, index*4)
         if not finite(current[index]) then return nil, label .. '_layout_mismatch' end
     end
     if not saved then
@@ -733,13 +776,13 @@ local function scale_modifier_block(api, address, offset, scale, label)
                     or not near(number(api.read(address + offset + index * 4, 4) or '', 0), target) then
                     return nil, label .. '_write_failed'
                 end
+                current[index] = target
                 changed = changed + 1
             end
         end
     end
     saved.applied_scale = scale
-    local head = api.read(address + offset, 4)
-    return changed, head and number(head, 0) or -1
+    return changed, current[0]
 end
 local function copy_cfg(cfg)
     return {
@@ -866,18 +909,25 @@ local function resolve_resource_config(api, game, key)
     local cloned, clone_reason = ensure_resource_clone(api, game, manager, root)
     if not cloned then return nil, clone_reason end
     root = cloned
+    local mapping = api.read(root,0x260)
+    if not mapping then return nil,'spawn_config_resource_unreadable' end
+    if config_cache and config_cache.key==key and config_cache.mapping==mapping
+        and same_pointer(api,config_cache.manager,manager) and same_pointer(api,config_cache.root,root) then
+        return config_cache.address,config_cache.source
+    end
     -- Native 0x505F50 uses an unsigned 64-bit key modulo 38. Reducing
     -- byte-by-byte avoids losing low bits through Lua's double precision.
     local slot = 0
     for byte = 8, 1, -1 do slot = (slot * 256 + key:byte(byte)) % patch.resource_slots end
     for _ = 1, patch.resource_slots do
-        local entry = api.read(root + slot * 16, 16)
-        if not entry then return nil, 'spawn_config_resource_unreadable' end
+        local entry = mapping:sub(slot*16+1,slot*16+16)
         local entry_key = entry:sub(1, 8)
         if entry_key == key then
             local index = u32(entry, 8)
             if index >= patch.resource_slots then return nil, 'spawn_config_resource_index_mismatch' end
-            return root + 0x260 + index * patch.cfg_stride, 'resource:' .. index
+            local address, source = root+0x260+index*patch.cfg_stride,'resource:'..index
+            config_cache={key=key,mapping=mapping,manager=manager,root=root,address=address,source=source}
+            return address,source
         end
         if entry_key == string.rep('\0', 8) then break end
         slot = (slot + 1) % patch.resource_slots
@@ -897,15 +947,10 @@ local function resolve_config(api, game, director)
         return resolve_resource_config(api, game, handle_data:sub(1, 8))
     end
 
-    local count_bytes = api.read(director + patch.cfg_count_offset, 4)
-    local count = count_bytes and u32(count_bytes, 0) or 0
-    local multiplier_bytes = api.read(director + patch.cfg_hash_multiplier_offset, 4)
-    if not multiplier_bytes then return nil, 'spawn_config_hash_unreadable' end
-    local hash_multiplier = u32(multiplier_bytes, 0)
-    local table_bytes = api.read(director + patch.cfg_table_offset, 8)
-    local hash_table = table_bytes and api.pointer(table_bytes, 0)
-    local sentinel_bytes = api.read(director + patch.cfg_sentinel_offset, 4)
-    local sentinel = sentinel_bytes and u32(sentinel_bytes, 0)
+    local identity = api.read(director+patch.cfg_table_offset,20)
+    if not identity then return nil,'spawn_config_hash_unreadable' end
+    local hash_table = api.pointer(identity,0)
+    local count, sentinel, hash_multiplier = u32(identity,8),u32(identity,12),u32(identity,16)
     if count == 0 then return resolve_resource_config(api, game, handle_data:sub(1, 8)) end
     if not hash_table or sentinel == nil then return nil, 'spawn_config_hash_unreadable' end
     if count < 1 or count > 64 then return nil, 'spawn_config_hash_layout_mismatch' end
@@ -915,15 +960,22 @@ local function resolve_config(api, game, director)
 
     -- The native lookup hashes the active handle generation, then linearly
     -- probes the compact (key, config-index) table until the sentinel.
+    local mapping=api.read(hash_table,count*8)
+    if not mapping then return nil,'spawn_config_hash_unreadable' end
+    if hash_cache and hash_cache.handle_data==handle_data and hash_cache.identity==identity
+        and hash_cache.mapping==mapping and same_pointer(api,hash_cache.director,director)
+        and same_pointer(api,hash_cache.handle,handle) then return hash_cache.address,hash_cache.source end
     local slot = ((hash_multiplier % count) * (generation % count)) % count
     for _ = 0, count - 1 do
-        local entry = api.read(hash_table + slot * 8, 8)
-        if not entry then return nil, 'spawn_config_hash_unreadable' end
+        local entry=mapping:sub(slot*8+1,slot*8+8)
         local key, index = u32(entry, 0), u32(entry, 4)
         if key == generation then
             if index == 0xFFFFFFFF then break end
             if index >= patch.cfg_max then return nil, 'spawn_config_index_mismatch' end
-            return director + patch.cfg_base_offset + index * patch.cfg_stride, 'director:' .. index
+            local address,source=director+patch.cfg_base_offset+index*patch.cfg_stride,'director:'..index
+            hash_cache={handle_data=handle_data,identity=identity,mapping=mapping,director=director,
+                handle=handle,address=address,source=source}
+            return address,source
         end
         if key == sentinel then break end
         slot = (slot + 1) % count
@@ -940,18 +992,6 @@ local function scale_config(api, game, director)
     mission.cfg = mission.cfg or {}
     local cfg = read_config(api, address)
     if not cfg then return 0, nil, 'spawn_config_layout_mismatch@' .. source end
-    if not api.writable_data(address + 0x38, 0x1c)
-        or not api.writable_data(address + patch.cfg_override_offset, 4)
-        or (patch.traveler_cooldown_enabled and not api.writable_data(address + 0x0c, 8)) then
-        return 0, nil, 'spawn_config_not_writable_private_data@' .. source
-    end
-    if patch.modifier_scale_enabled then
-        for _, block in ipairs(MODIFIER_BLOCKS) do
-            if not api.writable_data(address + block.offset, MODIFIER_BLOCK_SIZE * 4) then
-                return 0, nil, block.label .. '_not_writable_private_data@' .. source
-            end
-        end
-    end
     local key = source .. ':' .. tostring(address)
     local baseline = mission.cfg[key]
     if not baseline then
@@ -1073,6 +1113,7 @@ end
 
 function patch.apply(api, game)
     if not in_mission(api, game) then
+        if mission.director then patch.suspend(api,game) end
         reset()
         describe()
         return true, 'waiting_for_mission', false
@@ -1123,6 +1164,8 @@ function patch.apply(api, game)
         mission.guardforce_original, mission.guardforce_applied = nil, nil
         mission.cfg, mission.weights = nil, nil
         mission.cfg_address = nil
+        config_cache,hash_cache = nil,nil
+        override_state, modifier_state = {}, {}
     end
     local points_bytes = api.read(director + patch.points_offset, 8)
     if not points_bytes then return false, 'spawn_points_unreadable', false end

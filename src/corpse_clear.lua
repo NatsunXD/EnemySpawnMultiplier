@@ -8,8 +8,7 @@
 --   +0x10 unk_float    (float)
 --   +0x14 unk_bool     (uint8, followed by 3 padding bytes)
 --
--- The original DeleteTheDead records are offsets into one build of the loaded
--- generated-entity table. That table is rebuilt by the game and its layout moved
+-- That table is rebuilt by the game and its layout moved
 -- between 1.8.45850 and 1.8.46015, so fixed anchors are only a fast path now.
 -- When every old anchor fails its identity check, the module scans the live
 -- table for the complete Regular DecaySettings signature instead. This keeps the
@@ -27,8 +26,8 @@ return function(api, data, decayer_data)
     local MODE_SIGNATURE = string.char(1, 0, 0, 0)
     local HEADER_PROBE = 64
     local LOW_LIMIT, HIGH_LIMIT = 0x10000, 0x800000000000
-    local QUERIES_PER_PASS = 512
-    local READS_PER_PASS = 64
+    local QUERIES_PER_PASS = 128
+    local READS_PER_PASS = 16
     local PASS_INTERVAL = 0.5
     -- Keep each cross-process read bounded. The old 4 MiB chunk was large
     -- enough to monopolise a frame on a busy heap, and the completed sweep was
@@ -37,8 +36,10 @@ return function(api, data, decayer_data)
     -- rebuilt table.
     local DYNAMIC_CHUNK = 256 * 1024
     local DYNAMIC_OVERLAP = 24
-    local DYNAMIC_RECHECK_SECONDS = 5.0
     local MAX_EMPTY_SCAN_ROUNDS = 3
+    local SEED_RECHECK_SECONDS = 5.0
+    local MAX_MATCHES_PER_PASS = 256
+    local MAX_RECORDS = 4096
 
     local function cpu_now()
         if type(os) == 'table' and type(os.clock) == 'function' then
@@ -95,6 +96,8 @@ return function(api, data, decayer_data)
         decayer_seen = {}, decayer_originals = {}, decayer_touched = {},
         originals = {}, touched = {}, accumulator = 0.0,
         reason = 'idle', passes = 0, mode = 'seed',
+        seed_wait = 0, seed_settled = false, epoch = 0,
+        dynamic_order = {}, decayer_order = {}, check_index = 1, decayer_index = 1,
     }
 
     local function u32(bytes, offset)
@@ -131,6 +134,11 @@ return function(api, data, decayer_data)
         state.dynamic_already, state.dynamic_skipped, state.dynamic_errors = 0, 0, 0
         state.total_applied, state.total_already, state.total_written = 0, 0, 0
         state.dynamic_seen = {}
+        state.dynamic_order, state.decayer_order = {}, {}
+        state.check_index, state.decayer_index = 1, 1
+        state.originals, state.touched = {}, {}
+        state.decayer_seen, state.decayer_originals, state.decayer_touched = {}, {}, {}
+        state.seed_wait, state.seed_settled = 0, false
         state.dynamic_wait = 0
         state.dynamic_bytes, state.dynamic_amount = nil, 0
         state.dynamic_mode_pos, state.dynamic_decay_pattern = nil, 1
@@ -142,15 +150,14 @@ return function(api, data, decayer_data)
     -- signature check in apply_record().
     local function scan_pass()
         local queries, reads = 0, 0
+        local deadline = cpu_now()+0.002
         while state.cursor < HIGH_LIMIT and queries < QUERIES_PER_PASS and reads < READS_PER_PASS do
             local base, region_size, region_state, protection, region_type = api.query_region(state.cursor)
             queries = queries + 1
             if not base or not region_size or region_size <= 0 then
-                if state.cursor <= LOW_LIMIT then
-                    state.cursor = HIGH_LIMIT
-                else
-                    reset_scan()
-                end
+                -- End-of-address-space and query failures share the bounded
+                -- round counter. Resetting here used to bypass that counter.
+                state.cursor = HIGH_LIMIT
                 break
             end
             local prot = protection % 256
@@ -173,6 +180,8 @@ return function(api, data, decayer_data)
                         state.base, state.base_number = api.cast_uint8(base), base
                         state.region_size, state.found = live_size or region_size, true
                         state.base_protection = prot
+                        state.epoch = state.epoch + 1
+                        state.scan_rounds = 0
                         state.dynamic_cursor, state.dynamic_done, state.dynamic_wait = 0, false, 0
                         state.dynamic_candidates, state.dynamic_applied = 0, 0
                         state.dynamic_already, state.dynamic_skipped, state.dynamic_errors = 0, 0, 0
@@ -211,6 +220,7 @@ return function(api, data, decayer_data)
             local advance = base + region_size
             if advance <= state.cursor then advance = state.cursor + 0x1000 end
             state.cursor = advance
+            if cpu_now()>=deadline then break end
         end
         if state.cursor >= HIGH_LIMIT then
             state.scan_rounds = state.scan_rounds + 1
@@ -235,12 +245,12 @@ return function(api, data, decayer_data)
                 state.reason = 'scan_wrapped'
             end
         else
-            state.reason = string.format('scanning:%#x', state.cursor)
+            state.reason = 'entities_scanning'
         end
         return false
     end
 
-    local function record_is_regular(bytes, offset)
+    local function record_is_regular(bytes, offset, known)
         if #bytes < offset + RECORD_BYTES then return false end
         if u32(bytes, offset) ~= MODE_REGULAR then return false end
         local accel = f32(bytes, offset + 4)
@@ -249,9 +259,9 @@ return function(api, data, decayer_data)
         local unk = f32(bytes, offset + 16)
         if not (near(accel, 0.5) or near(accel, 0.2)) then return false end
         if not near_any(min_delay, {5, 7, 10, 30, 60}) then return false end
-        if not near_any(max_delay, {90, 120}) then return false end
+        if not near_any(max_delay, {90, 120}) and not (known and near(max_delay, MAX_DELAY)) then return false end
         if not near_any(unk, {0, 8, 10}) then return false end
-        -- +0x14 is unk_float, +0x18 is unk_bool, then 3 padding bytes.
+        -- +0x10 is the recovered unknown float, +0x14 the bool and padding.
         -- Records are not 4-byte aligned in this table (the live layout puts
         -- them at offset % 4 == 2), so callers must search every byte offset.
         local unk_bool = bytes:byte(offset + 21)
@@ -261,7 +271,7 @@ return function(api, data, decayer_data)
         return true
     end
 
-    local function write_record(address, live_min, live_max)
+    local function write_record(address, live_min, live_max, live_decay)
         local min_is_target, max_is_target = near(live_min, MIN_DELAY), near(live_max, MAX_DELAY)
         if not min_is_target and not near(live_min, 5) and not near(live_min, 7)
             and not near(live_min, 10) and not near(live_min, 30) and not near(live_min, 60) then
@@ -270,6 +280,7 @@ return function(api, data, decayer_data)
         if not max_is_target and not near(live_max, 90) and not near(live_max, 120) then
             return 'max_unexpected'
         end
+        if min_is_target and max_is_target and near(live_decay, DECAY_FLOAT) then return 'already' end
         local writable = api.writable_decay or api.writable_data
         if not writable(address, RECORD_BYTES) then return 'not_writable' end
         if not min_is_target then
@@ -290,9 +301,8 @@ return function(api, data, decayer_data)
         -- The field name is not authoritative but the original mod clearly treated
         -- it as part of the decay timing; set it to the same fast value as the
         -- delays so the visible disappearance is not gated by it.
-        local decay = api.read(address + 16, 4)
-        if decay then
-            local current = f32(decay, 0)
+        local current = live_decay
+        if current then
             if not near(current, DECAY_FLOAT) then
                 local bytes = api.encode_f32(DECAY_FLOAT)
                 local writer = api.write_decay or api.write
@@ -301,34 +311,27 @@ return function(api, data, decayer_data)
                 end
             end
         end
-        if min_is_target and max_is_target and decay and near(f32(decay, 0), DECAY_FLOAT) then
+        if min_is_target and max_is_target and near(current, DECAY_FLOAT) then
             return 'already'
         end
         return 'applied'
     end
 
-    local function recheck_dynamic()
-        if not state.base or not state.base_number or state.region_size <= 0 then
-            return false
-        end
-        local header = api.read(state.base_number, #TABLE_HEADER)
-        if not header or header:sub(1, #TABLE_HEADER) ~= TABLE_HEADER then
-            return false
-        end
-        local checked = 0
-        for absolute in pairs(state.dynamic_seen) do
-            local bytes = api.read(state.base_number + absolute, RECORD_BYTES)
-            if not bytes or not record_is_regular(bytes, 0) then
-                return false
-            end
-            local result = write_record(state.base + absolute, f32(bytes, 8), f32(bytes, 12))
-            if result ~= 'already' and result ~= 'applied' then
-                return false
-            end
-            checked = checked + 1
-            if checked >= 8 then break end
-        end
-        return checked > 0
+    local function table_live()
+        if not state.found or not state.base_number then return false end
+        local base, size, committed, _, kind = api.query_region(state.base_number)
+        return base == state.base_number and size == state.region_size
+            and committed == 0x1000 and kind == 0x20000
+            and api.read(state.base_number, #TABLE_HEADER) == TABLE_HEADER
+    end
+
+    local function known_record(bytes, original)
+        return bytes and original and record_is_regular(bytes, 0, true)
+            and near(f32(bytes, 4), original.accel)
+            and bytes:sub(21, 24) == original.tail
+            and (near(f32(bytes, 8), original.min) or near(f32(bytes, 8), MIN_DELAY))
+            and (near(f32(bytes, 12), original.max) or near(f32(bytes, 12), MAX_DELAY))
+            and (near(f32(bytes, 16), original.decay) or near(f32(bytes, 16), DECAY_FLOAT))
     end
 
     local function apply_record(row)
@@ -351,10 +354,11 @@ return function(api, data, decayer_data)
         if not near(live_max, max_delay) and not near(live_max, MAX_DELAY) then return 'max_unexpected' end
         if not state.originals[anchor] then
             local raw = f32(bytes, 16)
-            state.originals[anchor] = {min = live_min, max = live_max, decay = raw}
+            state.originals[anchor] = {min = live_min, max = live_max, decay = raw,
+                accel = live_accel, tail = bytes:sub(21,24)}
         end
-        local result = write_record(address, live_min, live_max)
-        if result == 'applied' then state.touched[anchor] = true end
+        state.touched[anchor] = true
+        local result = write_record(address, live_min, live_max, live_unk)
         return result
     end
 
@@ -362,12 +366,19 @@ return function(api, data, decayer_data)
     -- corpse enters the decay path. DeleteTheDead changed radius 1/3 -> 300.
     -- Keyed by the numeric offset inside the entity table, never by a pointer:
     -- LuaJIT cdata pointers are poor table keys, and offsets are stable.
-    local function write_decayer(absolute, live_radius)
+    local function write_decayer(absolute, live_radius, expected_node)
         if near(live_radius, DECAYER_RADIUS) then return 'already' end
         if not (near(live_radius, 1.0) or near(live_radius, 3.0)) then return 'radius_unexpected' end
         local address = state.base + absolute
         local writable = api.writable_decay or api.writable_data
         if not writable(address, DECAYER_BYTES) then return 'not_writable' end
+        local before = api.read(address, DECAYER_BYTES)
+        if not before or not near(f32(before, 0), live_radius)
+            or (expected_node and before:sub(5,8)~=expected_node) then return 'identity_changed' end
+        if not state.decayer_originals[absolute] then
+            state.decayer_originals[absolute] = {radius = live_radius, node = before:sub(5,8)}
+        end
+        state.decayer_touched[absolute] = true
         local writer = api.write_decay or api.write
         local bytes = api.encode_f32(DECAYER_RADIUS)
         if not writer(address, bytes) or api.read(address, 4) ~= bytes then
@@ -379,9 +390,7 @@ return function(api, data, decayer_data)
     local function note_decayer(result, absolute, live_radius)
         if result == 'applied' then
             state.decayer_applied = state.decayer_applied + 1
-            if not state.decayer_originals[absolute] then
-                state.decayer_originals[absolute] = live_radius
-            end
+
             state.decayer_touched[absolute] = true
         elseif result == 'already' then
             state.decayer_already = state.decayer_already + 1
@@ -404,7 +413,7 @@ return function(api, data, decayer_data)
             if bytes then
                 local live_radius = f32(bytes, 0)
                 if u32(bytes, 4) == node and live_radius then
-                    result = write_decayer(anchor, live_radius)
+                    result = write_decayer(anchor, live_radius, bytes:sub(5,8))
                 end
             end
             note_decayer(result, anchor, bytes and f32(bytes, 0) or 0)
@@ -415,31 +424,8 @@ return function(api, data, decayer_data)
         return n
     end
 
-    -- Signature pass: find every {radius, node} pair in the accepted table. This
-    -- makes the feature survive table rebuilds, exactly like the DecaySettings
-    -- scan above.
-    local function apply_decayer_dynamic(chunk_bytes, chunk_base)
-        if #DECAYER_PATTERNS == 0 then return end
-        for _, pattern in ipairs(DECAYER_PATTERNS) do
-            local pos = 1
-            while true do
-                local hit = chunk_bytes:find(pattern, pos, true)
-                if not hit then break end
-                local offset = hit - 1
-                local absolute = chunk_base + offset
-                if not state.decayer_seen[absolute] then
-                    state.decayer_seen[absolute] = true
-                    local live_radius = f32(chunk_bytes, offset)
-                    if live_radius then
-                        note_decayer(write_decayer(absolute, live_radius), absolute, live_radius)
-                    end
-                end
-                pos = hit + 1
-            end
-        end
-    end
-
     local function apply_seed_pass()
+        state.decayer_applied, state.decayer_already, state.decayer_skipped = 0, 0, 0
         local dn = apply_decayer_seed()
         local n = {applied = 0, already = 0, skipped = 0, mismatched = 0,
                    decayer = dn}
@@ -457,40 +443,61 @@ return function(api, data, decayer_data)
         return n
     end
 
-    local function apply_dynamic(absolute, live_min, live_max)
+    local function apply_dynamic(absolute)
         if state.dynamic_seen[absolute] then return 'seen' end
-        state.dynamic_seen[absolute] = true
-        state.dynamic_candidates = state.dynamic_candidates + 1
-        local address = state.base + absolute
-        if not state.originals[absolute] then
-            local raw = api.read(address + 16, 4)
-            state.originals[absolute] = {min = live_min, max = live_max,
-                                         decay = raw and f32(raw, 0) or 0}
+        if #state.dynamic_order >= MAX_RECORDS then
+            state.gave_up, state.mode, state.reason = true, 'gave_up', 'dynamic_record_limit'
+            return 'limit'
         end
-        local result = write_record(address, live_min, live_max)
+        -- The chunk is a snapshot: re-read this record immediately before writing.
+        local address = state.base + absolute
+        local bytes = api.read(address, RECORD_BYTES)
+        local previous = state.originals[absolute]
+        if not bytes or not (previous and known_record(bytes,previous) or record_is_regular(bytes,0)) then return 'changed' end
+        local live_min, live_max, live_unk = f32(bytes,8), f32(bytes,12), f32(bytes,16)
+        state.dynamic_seen[absolute] = true
+        state.dynamic_order[#state.dynamic_order+1] = absolute
+        state.dynamic_candidates = state.dynamic_candidates + 1
+        if not state.originals[absolute] then
+            state.originals[absolute] = {min=live_min,max=live_max,decay=live_unk,
+                accel=f32(bytes,4),tail=bytes:sub(21,24)}
+        end
+        state.touched[absolute] = true -- also guards restore after a partial write
+        local result = write_record(address,live_min,live_max,live_unk)
         if result == 'applied' then
-            state.touched[absolute] = true
-            state.dynamic_applied = state.dynamic_applied + 1
             state.total_applied = state.total_applied + 1
-            state.total_written = state.total_written + 1
         elseif result == 'already' then
             state.total_already = state.total_already + 1
-            state.dynamic_already = state.dynamic_already + 1
         else
             state.dynamic_skipped = state.dynamic_skipped + 1
-            -- Record the exact refusal reason; without it the live log only shows
-            -- applied=0 and cannot distinguish a layout problem from a write
-            -- permission problem.
-            state.skip_reasons = state.skip_reasons or {}
             state.skip_reasons[result] = (state.skip_reasons[result] or 0) + 1
-            if result == 'min_unexpected' or result == 'max_unexpected' or result == 'not_writable' then
-                state.dynamic_errors = state.dynamic_errors + 1
-            end
         end
         return result
     end
 
+    local function recheck_dynamic()
+        for _ = 1, math.min(8, #state.dynamic_order) do
+            local absolute = state.dynamic_order[state.check_index]
+            local bytes = api.read(state.base + absolute, RECORD_BYTES)
+            if not known_record(bytes, state.originals[absolute]) then return false end
+            local result = write_record(state.base+absolute,f32(bytes,8),f32(bytes,12),f32(bytes,16))
+            if result ~= 'already' and result ~= 'applied' then return false end
+            state.check_index = state.check_index % #state.dynamic_order + 1
+        end
+        for _ = 1, math.min(8, #state.decayer_order) do
+            local absolute = state.decayer_order[state.decayer_index]
+            local bytes = api.read(state.base+absolute, DECAYER_BYTES)
+            local original = state.decayer_originals[absolute]
+            if not bytes or not original or bytes:sub(5,8) ~= original.node then return false end
+            local result = write_decayer(absolute, f32(bytes,0),original.node)
+            if result ~= 'already' and result ~= 'applied' then return false end
+            state.decayer_index = state.decayer_index % #state.decayer_order + 1
+        end
+        return #state.dynamic_order > 0 or #state.decayer_order > 0
+    end
+
     local function dynamic_pass()
+        local deadline = cpu_now()+0.002
         if not state.base or not state.base_number or state.region_size <= 0 then
             state.reason = 'dynamic_no_region'
             return
@@ -533,7 +540,8 @@ return function(api, data, decayer_data)
         end
 
         local bytes = state.dynamic_bytes
-        local deadline = cpu_now() + 0.002
+        local matches = 0
+        if cpu_now()>=deadline then return end
         while state.dynamic_mode_pos do
             local hit = bytes:find(MODE_SIGNATURE, state.dynamic_mode_pos, true)
             if not hit then
@@ -541,13 +549,14 @@ return function(api, data, decayer_data)
                 break
             end
             local offset = hit - 1
-            if record_is_regular(bytes, offset) then
-                local absolute = state.dynamic_chunk_base + offset
-                local live_min, live_max = f32(bytes, offset + 8), f32(bytes, offset + 12)
-                apply_dynamic(absolute, live_min, live_max)
+            local absolute = state.dynamic_chunk_base+offset
+            local original = state.originals[absolute]
+            if record_is_regular(bytes,offset) or (original and known_record(bytes:sub(offset+1,offset+RECORD_BYTES),original)) then
+                apply_dynamic(absolute)
             end
             state.dynamic_mode_pos = hit + 1
-            if cpu_now() >= deadline then
+            matches = matches + 1
+            if matches >= MAX_MATCHES_PER_PASS or cpu_now() >= deadline or state.gave_up then
                 state.reason = 'dynamic_scan'
                 return
             end
@@ -560,10 +569,15 @@ return function(api, data, decayer_data)
                 local offset = hit - 1
                 local absolute = state.dynamic_chunk_base + offset
                 if not state.decayer_seen[absolute] then
+                    if #state.decayer_order >= MAX_RECORDS then
+                        state.gave_up, state.mode, state.reason = true, 'gave_up', 'dynamic_record_limit'
+                        return
+                    end
                     state.decayer_seen[absolute] = true
+                    state.decayer_order[#state.decayer_order+1] = absolute
                     local live_radius = f32(bytes, offset)
                     if live_radius then
-                        note_decayer(write_decayer(absolute, live_radius), absolute, live_radius)
+                        note_decayer(write_decayer(absolute, live_radius, bytes:sub(offset+5,offset+8)), absolute, live_radius)
                     end
                 end
                 state.dynamic_decay_pos = hit + 1
@@ -571,7 +585,8 @@ return function(api, data, decayer_data)
                 state.dynamic_decay_pattern = state.dynamic_decay_pattern + 1
                 state.dynamic_decay_pos = 1
             end
-            if cpu_now() >= deadline then
+            matches = matches + 1
+            if matches >= MAX_MATCHES_PER_PASS or cpu_now() >= deadline or state.gave_up then
                 state.reason = 'dynamic_scan'
                 return
             end
@@ -590,22 +605,37 @@ return function(api, data, decayer_data)
     end
 
     local function apply_pass()
+        if not table_live() then
+            reset_scan()
+            state.reason = 'entities_identity_changed'
+            return
+        end
         if not state.seed_dead then
+            if state.seed_settled then
+                state.seed_wait = state.seed_wait + PASS_INTERVAL
+                if state.seed_wait < SEED_RECHECK_SECONDS then return end
+                state.seed_wait = 0
+            end
             local n = apply_seed_pass()
-            -- The fixed anchors may fail for several reasons (identity mismatch,
-            -- unexpected min/max, unreadable). Each table is judged separately:
-            -- either one failing means the old layout is unusable and the
-            -- signature scanner must take over for both.
-            local decay_failed = (n.applied + n.already == 0 and n.skipped == #data)
+            -- Partial drift matters too: surviving anchors must not hide moved
+            -- rows. Carry existing originals into the dynamic sweep.
+            local decay_failed = n.skipped > 0
             local dn = n.decayer or {applied = 0, already = 0, skipped = 0}
             local decayer_present = type(decayer_data) == 'table' and #decayer_data > 0
             local decayer_failed = decayer_present
-                and (dn.applied + dn.already == 0 and dn.skipped == #decayer_data)
+                and dn.skipped > 0
             if decay_failed or decayer_failed then
                 state.seed_dead = true
+                -- Keep records already changed during a partial seed pass in
+                -- the rolling verification ledger; discover moved native rows.
+                for absolute in pairs(state.decayer_originals) do
+                    state.decayer_seen[absolute]=true
+                    state.decayer_order[#state.decayer_order+1]=absolute
+                end
                 state.mode = 'dynamic'
             else
                 state.mode = 'seed'
+                state.seed_settled = true
                 state.applied, state.already, state.skipped, state.mismatched =
                     n.applied, n.already, n.skipped, n.mismatched
                 state.reason = string.format('applied=%d already=%d skipped=%d',
@@ -614,22 +644,15 @@ return function(api, data, decayer_data)
             end
         end
         if state.dynamic_done then
-            state.dynamic_wait = state.dynamic_wait + PASS_INTERVAL
-            if state.dynamic_wait >= DYNAMIC_RECHECK_SECONDS then
-                state.dynamic_wait = 0
-                if not recheck_dynamic() then
-                    -- A table rebuild invalidates the old addresses. Only then
-                    -- pay for another bounded full sweep.
-                    state.dynamic_cursor, state.dynamic_done = 0, false
-                    state.dynamic_seen = {}
-                    state.dynamic_candidates, state.dynamic_applied = 0, 0
-                    state.dynamic_already, state.dynamic_skipped = 0, 0
-                    state.total_applied, state.total_already, state.total_written = 0, 0, 0
-                    state.reason = 'dynamic_rebuild_detected'
-                end
+            if not recheck_dynamic() then
+                reset_scan()
+                state.reason = 'dynamic_identity_changed'
             end
         else
             dynamic_pass()
+            if state.dynamic_done and #state.dynamic_order == 0 and #state.decayer_order == 0 then
+                state.gave_up, state.mode, state.reason = true, 'gave_up', 'dynamic_no_records'
+            end
         end
         -- Expose lifetime totals once the dynamic path is active. A single sweep
         -- can wrap before the next status read, so per-sweep counters alone would
@@ -650,32 +673,39 @@ return function(api, data, decayer_data)
     end
 
     function M.restore()
-        if not (state.found and state.base) then return 0 end
+        if not table_live() then
+            reset_scan()
+            state.reason = 'restore_identity_changed'
+            return 0
+        end
         local restored = 0
+        local writer = api.write_decay or api.write
         for anchor in pairs(state.touched) do
             local original = state.originals[anchor]
             local address = state.base + anchor
-            local writable = api.writable_decay or api.writable_data
-            if original and writable(address, RECORD_BYTES) then
-                local writer = api.write_decay or api.write
-                local ok = writer(address + 8, api.encode_f32(original.min))
-                    and writer(address + 12, api.encode_f32(original.max))
-                if original.decay then
-                    ok = ok and writer(address + 16, api.encode_f32(original.decay))
+            local bytes = api.read(address, RECORD_BYTES)
+            if known_record(bytes, original) then
+                local ok = true
+                for _, field in ipairs({{8, original.min, MIN_DELAY}, {12, original.max, MAX_DELAY},
+                                        {16, original.decay, DECAY_FLOAT}}) do
+                    if near(f32(bytes,field[1]),field[3]) then
+                        local encoded = api.encode_f32(field[2])
+                        ok = writer(address+field[1],encoded) and api.read(address+field[1],4)==encoded and ok
+                    end
                 end
                 if ok then restored = restored + 1 end
             end
         end
-        for absolute, original_radius in pairs(state.decayer_originals) do
-            local address = state.base + absolute
-            local writer = api.write_decay or api.write
-            local bytes = api.encode_f32(original_radius)
-            if writer(address, bytes) and api.read(address, 4) == bytes then
-                restored = restored + 1
+        for absolute, original in pairs(state.decayer_originals) do
+            local address = state.base+absolute
+            local bytes = api.read(address, DECAYER_BYTES)
+            if bytes and bytes:sub(5,8)==original.node and near(f32(bytes,0),DECAYER_RADIUS) then
+                local encoded = api.encode_f32(original.radius)
+                if writer(address,encoded) and api.read(address,4)==encoded then restored=restored+1 end
             end
         end
-        state.touched, state.applied, state.already = {}, 0, 0
-        state.decayer_touched, state.decayer_originals = {}, {}
+        reset_scan()
+        state.applied, state.already = 0, 0
         state.decayer_applied, state.decayer_already, state.decayer_skipped = 0, 0, 0
         state.reason = 'restored=' .. restored
         return restored
@@ -699,7 +729,7 @@ return function(api, data, decayer_data)
 
     function M.status()
         return {
-            enabled = state.enabled, located = state.found, mode = state.mode,
+            enabled = state.enabled, located = state.found, mode = state.mode, epoch = state.epoch,
             applied = state.applied, already = state.already,
             skipped = state.skipped, mismatched = state.mismatched,
             passes = state.passes, reason = state.reason,

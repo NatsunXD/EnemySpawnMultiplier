@@ -139,9 +139,9 @@ pass('repeat passes are idempotent')
 -- written, while the others continue to be reported as already applied.
 local victim = data[1][1]
 put_f32(table_base + victim + 4, 123.456)
-run(2)
+run(6)
 local st3 = mod.status()
-assert(st3.skipped >= 1, 'a mismatched row must be skipped')
+assert(st3.mode == 'dynamic', 'a partially mismatched seed layout must enter dynamic recovery')
 assert(approx(get_f32(table_base + victim + 8), 5.0),
     'a row whose identity failed must not have been written again')
 pass('a row whose identity no longer matches is skipped, not written')
@@ -219,8 +219,10 @@ assert(dst.dynamic_candidates >= #data,
     'dynamic scanner found fewer records than the synthetic table: ' .. tostring(dst.dynamic_candidates))
 assert(dst.applied + dst.already >= #data, 'dynamic scanner did not settle every record')
 local completed_sweeps = dst.dynamic_sweeps
-run(8)
+for _ = 1, 16 do mod3.update(0.5) end
 local quiet = mod3.status()
+assert(quiet.dynamic_cursor >= quiet.dynamic_size and quiet.dynamic_candidates >= #data,
+    'completed scan lost its candidate ledger or restarted')
 assert(quiet.dynamic_sweeps == completed_sweeps,
     'dynamic scanner restarted a full sweep without a table rebuild')
 pass('completed dynamic scan stays quiet and does not wrap continuously')
@@ -391,5 +393,76 @@ for _, row in ipairs(decayer_data) do
     assert(approx(get_f32(p + 0), row[2]), 'decayer radius was not restored')
 end
 pass('disabling the switch restores the original decayer radius')
+
+
+-- Steady-state budget includes table identity checks, rather than counting only
+-- the optimized record loop. Five seconds is the maximum seed refresh delay.
+for _,row in ipairs(data) do
+ local p=table_base+row[1]
+ put_u32(p,1); put_f32(p+4,row[2]); put_f32(p+8,row[3]); put_f32(p+12,row[4]);put_f32(p+16,row[5])
+ ffi.fill(p+20,4,0)
+end
+local budget=create_corpse(api,data,decayer_data)
+for _=1,3 do budget.update(0.5) end
+local reads,permissions,writes=0,0,0
+local real_read,real_writable,real_write=api.read,api.writable_decay,api.write_decay
+api.read=function(a,n) reads=reads+1; return real_read(a,n) end
+api.writable_decay=function(a,n) permissions=permissions+1; return real_writable(a,n) end
+api.write_decay=function(a,b) writes=writes+1;return real_write(a,b) end
+for _=1,20 do budget.update(0.5) end
+assert(reads<=350 and permissions==0 and writes==0,'steady corpse budget exceeded: '..reads..'/'..permissions..'/'..writes)
+print('BUDGET seed 10s reads='..reads..' permissions='..permissions..' writes='..writes)
+put_f32(table_base+data[1][1]+12,data[1][4])
+for _=1,10 do budget.update(0.5) end
+assert(approx(get_f32(table_base+data[1][1]+12),5),'seed refresh missed a native rewrite')
+pass('steady seed performs <=350 reads/10s, no permission checks/writes, repairs native resets')
+api.read,api.writable_decay,api.write_decay=real_read,real_writable,real_write
+
+-- Restore only records whose identity and current value are still ours.
+local victim=data[1][1]
+put_f32(table_base+victim+4,123.456)
+local decayer_victim=decayer_data[1][1]
+put_u32(table_base+decayer_victim+4,0xDEADBEEF)
+budget.set_enabled(false)
+assert(approx(get_f32(table_base+victim+12),5),'restore overwrote a replaced decay record')
+assert(approx(get_f32(table_base+decayer_victim),300),'restore overwrote a replaced decayer node')
+pass('restore skips replaced decay and decayer identities')
+
+local queries=0
+local empty_api=setmetatable({query_region=function(address)
+ queries=queries+1
+ if address<=0x10000 then return 0x10000,0x1000,0x10000,0,0 end
+ return nil
+end},{__index=api})
+local no_table=create_corpse(empty_api,data,decayer_data)
+for _=1,30 do no_table.update(0.5) end
+assert(no_table.status().mode=='gave_up' and queries==6,'nil query bypassed bounded retries')
+no_table.set_enabled(false);no_table.set_enabled(true);no_table.update(0.5)
+assert(queries>6,'explicit re-enable should allow another bounded discovery')
+pass('query end/failure stops after three rounds and explicit enable retries')
+
+ffi.fill(table_base,TABLE_SIZE,0);ffi.copy(table_base,HEADER,#HEADER)
+local zero=create_corpse(api,data,decayer_data)
+for _=1,400 do zero.update(0.5) end
+assert(zero.status().reason=='dynamic_no_records' and zero.status().dynamic_sweeps==1,
+ 'zero-candidate table did not stop after one complete scan')
+pass('zero-candidate table is terminal instead of rescanning forever')
+
+-- Missing clock cannot make a dense signature chunk unbounded.
+ffi.copy(table_base+64,string.rep(string.char(1,0,0,0),65500),262000)
+local chunk=assert(loadfile(source..'/corpse_clear.lua'))
+setfenv(chunk,setmetatable({os={}},{__index=_G}))
+local dense=chunk()(api,data,decayer_data)
+dense.update(0.5);dense.update(0.5)
+assert(dense.status().dynamic_cursor==0,'dense chunk was not sliced by the work budget without a clock')
+pass('dense signature scan yields by work count when os.clock is unavailable')
+
+-- An unmapped/replaced table must never be restored through its old offsets.
+ffi.copy(table_base,HEADER,#HEADER)
+local stale=create_corpse(api,data,decayer_data)
+stale.update(0.5)
+ffi.fill(table_base,#HEADER,0)
+assert(stale.restore()==0 and not stale.status().located,'stale table remained eligible for restore')
+pass('invalid table header drops stale addresses before restore')
 
 print(count .. ' corpse decay checks passed; no game process involved.')

@@ -46,13 +46,35 @@ return function()
         return ffi.cast('uint8_t *', handle)
     end
 
+    -- Bounded capacity classes: <= 1 MiB retained in total, no global mutable
+    -- return buffer. ReadProcessMemory is synchronous and cannot call Lua back;
+    -- busy still protects nested reads if the binding later gains a callback.
+    local scratch, scratch_count, scratch_busy = {}, ffi.new('size_t[1]'), false
     function api.read(address, size)
-        local buffer, count = ffi.new('uint8_t[?]', size), ffi.new('size_t[1]')
-        local pointer = ffi.cast('const void *', address)
-        if kernel.ReadProcessMemory(process, pointer, buffer, size, count) == 0 or count[0] ~= size then
+        if type(size) ~= 'number' or size ~= math.floor(size) or size <= 0 or size > 16*1024*1024 then return nil end
+        local capacity = 32
+        while capacity < size and capacity < 512*1024 do capacity = capacity*2 end
+        local pointer = ffi.cast('const void *',address)
+        local pooled = not scratch_busy and size <= capacity
+        local buffer, count
+        if pooled then
+            buffer = scratch[capacity]
+            if not buffer then buffer=ffi.new('uint8_t[?]',capacity); scratch[capacity]=buffer end
+            count, scratch_busy = scratch_count, true
+        else
+            buffer, count = ffi.new('uint8_t[?]',size), ffi.new('size_t[1]')
+        end
+        count[0] = 0
+        local result = kernel.ReadProcessMemory(process,pointer,buffer,size,count)
+        if result == 0 or count[0] ~= size then
+            if pooled then scratch_busy=false end
             return nil
         end
-        return ffi.string(buffer, size)
+        -- Keep the pool reserved through string construction too: a GC
+        -- finalizer may perform a nested read while allocating the string.
+        local bytes=ffi.string(buffer,size)
+        if pooled then scratch_busy=false end
+        return bytes
     end
 
     function api.write(address, bytes)
@@ -180,8 +202,8 @@ return function()
         -- Always restore, even when the write failed, so the game keeps the page
         -- protection it established.
         local restored = ffi.new('uint32_t[1]')
-        protect_region(pointer, #bytes, old[0], restored)
-        return ok
+        local protection_ok = protect_region(pointer,#bytes,old[0],restored) ~= 0
+        return ok and protection_ok
     end
 
     function api.decay_status()

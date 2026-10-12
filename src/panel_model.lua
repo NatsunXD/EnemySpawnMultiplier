@@ -63,7 +63,7 @@ return function()
         return true
     end
 
-    -- Width fits the full 'EnemySpawnMultiplier v22 by Natsun' title plus the
+    -- Width fits the full 'EnemySpawnMultiplier v23 by Natsun' title plus the
     -- toggle hint on the same row.
     M.CLIENT_W, M.CLIENT_H = 580, 500
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
