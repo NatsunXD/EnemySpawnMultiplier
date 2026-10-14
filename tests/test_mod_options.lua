@@ -47,10 +47,10 @@ local config,patch,stats=fresh()
 local menu=fake_menu()
 local bridge=create_options(config,{get_menu=function() return menu end})
 bridge.pump(0.1)
-assert(bridge.status=='ready' and bridge.registered==8)
+assert(bridge.status=='ready' and bridge.registered==15)
 local calls,writes=stats()
 assert(calls==0 and writes==0,'unchanged startup must not rewrite profile')
-pass('registers eight options without extra writes or a Runtime dependency')
+pass('registers fifteen options without extra writes or a Runtime dependency')
 
 menu.apply({[prefix..'budget']=3.5,[prefix..'patrol_count']=2.5,
     [prefix..'patrol_size']=0.5,[prefix..'encounter_cd']=12,[prefix..'patrol_cd']=18,

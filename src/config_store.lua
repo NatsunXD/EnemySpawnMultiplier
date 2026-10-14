@@ -19,7 +19,10 @@ return function(options)
     M.FILENAME = options.filename or 'EnemySpawnMultiplier.cfg'
 
     -- Written in this order so the file is stable and diffable.
-    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset', 'fast_corpse', 'language'}
+    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset', 'fast_corpse', 'language',
+                'block_jumpers', 'block_yellow_spewers', 'block_green_spewers', 'block_bile_spitters', 'block_scavengers', 'block_shriekers', 'block_all_small'}
+    local BOOLEAN = {fast_corpse = true,
+        block_jumpers = true, block_yellow_spewers = true, block_green_spewers = true, block_bile_spitters = true, block_scavengers = true, block_shriekers = true, block_all_small = true}
 
     -- Same ranges the panel and patch.configure() enforce. Values read back out
     -- of range are clamped here so a corrupt file degrades to a valid profile
@@ -69,7 +72,7 @@ return function(options)
                     lines[#lines + 1] = key .. '=' .. value
                 elseif type(value) == 'string' and PRESETS[value] then
                     lines[#lines + 1] = key .. '=' .. value
-                elseif key == 'fast_corpse' and type(value) == 'boolean' then
+                elseif BOOLEAN[key] and type(value) == 'boolean' then
                     lines[#lines + 1] = key .. '=' .. (value and 'true' or 'false')
                 end
             end
@@ -91,9 +94,9 @@ return function(options)
                         if PRESETS[value] then settings.preset = value end
                     elseif key == 'language' then
                         if value == 'zh' or value == 'en' then settings.language = value end
-                    elseif key == 'fast_corpse' then
-                        if value == 'true' then settings.fast_corpse = true
-                        elseif value == 'false' then settings.fast_corpse = false end
+                    elseif BOOLEAN[key] then
+                        if value == 'true' then settings[key] = true
+                        elseif value == 'false' then settings[key] = false end
                     elseif LIMITS[key] then
                         local number = tonumber(value)
                         if number and number == number then

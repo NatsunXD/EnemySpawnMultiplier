@@ -35,9 +35,9 @@ local bridge=create_options(config)
 bridge.pump(0.1)
 assert(bridge.status=='ready',tostring(bridge.reason))
 local prefix='natsun.enemy_spawn_multiplier.'
-assert(#context.state.mods==1 and #context.state.mods[1].order==8)
+assert(#context.state.mods==1 and #context.state.mods[1].order==15)
 assert(not menu.ready(),'test must never activate native integration')
-print('PASS: all eight real menu registrations accepted, one category, native integration inactive')
+print('PASS: all fifteen real menu registrations accepted, one category, native integration inactive')
 
 context.set_pending(prefix..'budget',3.7)
 context.set_pending(prefix..'patrol_count',2.1)
@@ -100,4 +100,27 @@ assert(menu.get(prefix..'language')==2)
 assert(config.current().patrol_size==0.7,'language button must not submit Reset drafts')
 panel.close()
 print('PASS: actual F8 panel and actual MODS API synchronize both ways')
-print('5 upstream integration checks passed; no game process or native menu update involved.')
+local filter_keys = {'block_jumpers', 'block_yellow_spewers', 'block_green_spewers',
+    'block_bile_spitters', 'block_scavengers', 'block_shriekers', 'block_all_small'}
+local before_calls, before_writes = configures, writes
+for _, key in ipairs(filter_keys) do context.set_pending(prefix .. key, true) end
+assert(context.apply_pending() == 7)
+bridge.pump(0.1)
+assert(configures == before_calls + 1 and writes == before_writes + 1)
+for _, key in ipairs(filter_keys) do assert(patch[key] and config.current()[key]) end
+local reopened = assert(create_panel(create_model, patch, {config=config, log=function() end}))
+for _, key in ipairs(filter_keys) do assert(reopened.model.pending[key] == true) end
+reopened.model.pending.block_all_small = false
+assert(reopened.apply())
+assert(menu.get(prefix .. 'block_all_small') == false)
+assert(menu.get(prefix .. 'block_jumpers') and menu.get(prefix .. 'block_yellow_spewers'))
+for _, language in ipairs({'en', 'zh'}) do
+    assert(reopened.set_language(language))
+    context.translation.refresh()
+    for _, key in ipairs(filter_keys) do
+        assert(context.state.options[prefix .. key].label == config.text(key))
+    end
+end
+reopened.close()
+print('PASS: actual menu batches all filters, reopens F8, preserves individual choices and translates every row')
+print('6 upstream integration checks passed; no game process or native menu update involved.')
