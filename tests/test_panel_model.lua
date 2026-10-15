@@ -21,11 +21,13 @@ assert(approx(model.pending.encounter_cd, 2.0))
 assert(approx(model.pending.patrol_cd, 2.0))
 assert(model.pending.preset == 'heavy')
 assert(model.pending.fast_corpse == true)
+assert(model.pending.dynamic_spawn == true)
 pass('panel defaults to 2x budget, 1x patrol count, fast cooldowns and heavy')
 
 -- Five sliders, one checkbox and three radios, in the documented order.
 local widgets = model.layout()
-assert(#widgets.sliders == 5 and #widgets.checkboxes == 1 and #widgets.radios == 3 and #widgets.buttons == 4)
+assert(#widgets.sliders == 5 and #widgets.checkboxes == 2 and #widgets.radios == 3 and #widgets.buttons == 4)
+assert(widgets.checkboxes[2].key == 'dynamic_spawn')
 assert(widgets.buttons[4].id == 'language')
 assert(widgets.checkboxes[1].key == 'fast_corpse' and #widgets.checkboxes[1].label > 0)
 assert(widgets.sliders[1].key == 'budget')
@@ -39,7 +41,7 @@ assert(type(widgets.buttons[3].label) == 'string' and #widgets.buttons[3].label 
 assert(widgets.radios[1].value == 'heavy')
 assert(widgets.radios[2].value == 'light_medium')
 assert(widgets.radios[3].value == 'native')
-pass('panel exposes five sliders, the corpse checkbox and three radios')
+pass('panel exposes five sliders, two checkboxes and three radios')
 
 -- Every label the panel paints must be present and non-empty.
 for _, control in ipairs(widgets.sliders) do
@@ -199,6 +201,13 @@ model.sync_from_patch({budget_multiplier = 2.0, modifier_patrol_count = 2.0,
 assert(model.pending.preset == 'native')
 assert(model.pending.fast_corpse == false)
 pass('panel sync mirrors the live profile and preset')
+model.sync_from_patch({budget_multiplier=2,modifier_patrol_count=3,
+    modifier_travelers_max_unit=2,modifier_patrol_cooldown=6,patrol_cooldown_fast_rate=6,
+    encounter_deadline_enabled=true,encounter_max_interval=2,
+    dynamic_spawn_enabled=true,dynamic={effective={count=1,size=1,rate=1}}})
+assert(model.pending.patrol_count==3 and model.pending.patrol_size==2)
+assert(model.pending.patrol_cd==2 and model.pending.dynamic_spawn==true)
+pass('background effective values never move the requested UI controls')
 
 -- Reset must restore every documented default.
 model.pending.budget = 5.5

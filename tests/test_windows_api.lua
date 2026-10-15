@@ -46,6 +46,34 @@ assert(api.writable_decay(exe_base, 4) == false,
     'a mapped module image must never be writable_decay')
 pass('writable_decay rejects null and module-image addresses')
 
+-- Patrol-exemption experiments must not silently broaden the production API.
+-- All native access in this test is to this isolated LuaJIT process, not HD2.
+local module_before = assert(api.read(exe_base, 4))
+assert(not api.writable_data(exe_base, 4))
+assert(not api.write(exe_base, module_before))
+assert(not api.write_decay(exe_base, module_before))
+assert(api.read(exe_base, 4) == module_before)
+pass('both production write surfaces reject the host module image')
+
+local kernel = ffi.load('kernel32')
+local protect = ffi.cast('int32_t (*)(void *, size_t, uint32_t, uint32_t *)', kernel.VirtualProtect)
+local previous, ignored = ffi.new('uint32_t[1]'), ffi.new('uint32_t[1]')
+local private_before = assert(api.read(decay_address, 16))
+-- Change only a page allocated by this test; no instruction is executed there.
+assert(protect(decay_block, 64, 0x20, previous) ~= 0)
+local checked, err = pcall(function()
+    assert(not api.writable_data(decay_address, 16))
+    assert(not api.writable_decay(decay_address, 16))
+    assert(not api.write(decay_address, private_before))
+    assert(not api.write_decay(decay_address, private_before))
+    assert(api.read(decay_address, 16) == private_before)
+end)
+local restored = protect(decay_block, 64, previous[0], ignored) ~= 0
+assert(restored, 'test-owned page protection restore failed')
+assert(checked, err)
+assert(api.decay_protection(decay_address, 16) == 4)
+pass('both production write surfaces reject executable private pages')
+
 print(count .. ' Windows API checks passed; no game process involved.')
 
 local held=assert(api.read(address+8,4))

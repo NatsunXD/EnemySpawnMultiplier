@@ -35,9 +35,9 @@ local bridge=create_options(config)
 bridge.pump(0.1)
 assert(bridge.status=='ready',tostring(bridge.reason))
 local prefix='natsun.enemy_spawn_multiplier.'
-assert(#context.state.mods==1 and #context.state.mods[1].order==8)
+assert(#context.state.mods==1 and #context.state.mods[1].order==9)
 assert(not menu.ready(),'test must never activate native integration')
-print('PASS: all eight real menu registrations accepted, one category, native integration inactive')
+print('PASS: all nine real menu registrations accepted, one category, native integration inactive')
 
 context.set_pending(prefix..'budget',3.7)
 context.set_pending(prefix..'patrol_count',2.1)

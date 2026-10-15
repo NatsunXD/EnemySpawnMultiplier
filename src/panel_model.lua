@@ -11,6 +11,15 @@ return function()
             budget='增援预算', patrol_count='巡逻数量', patrol_size='巡逻规模',
             encounter_cd='增援 CD', patrol_cd='巡逻 CD',
             fast_corpse='尸体快速消失（保留布娃娃）',
+            fast_corpse_short='尸体快速消失', fast_corpse_hint='保留布娃娃',
+            dynamic_spawn='动态生成补偿',
+            dynamic_spawn_short='动态生成补偿',
+            console='EnemySpawnMultiplier', console_hint='by Natsun',
+            spawn_section='01 / 生成参数', assist_section='02 / 辅助控制',
+            composition_section='03 / 增援构成',
+            heavy_short='重甲优先', light_medium_short='轻中甲优先', native_short='原版构成',
+            heavy_hint='提高重甲权重', light_medium_hint='提高轻 / 中甲权重', native_hint='保留原生权重',
+            enabled='开启', disabled='关闭',
             heavy='偏向重甲（重甲更多）', light_medium='偏向轻中甲（轻中甲更多）',
             native='原版（不改模板权重）', presets='模板预设',
             apply='应用', reset='重置', export='导出游戏日志', language_button='English',
@@ -27,6 +36,7 @@ return function()
             encounter_cd_desc='目标增援间隔（秒）；30 秒使用原版节奏。',
             patrol_cd_desc='目标巡逻间隔（秒），通过倍率曲线近似；30 秒使用原版节奏。',
             fast_corpse_desc='加快尸体消失并保留布娃娃；关闭时恢复原值。',
+            dynamic_spawn_desc='',
             preset_desc='调整增援模板权重：重甲、轻中甲或原版。',
             language_desc='切换 ESM 的中英文。F8 面板即时刷新；MODS 文案在重新打开暂停菜单后刷新。',
         },
@@ -34,6 +44,15 @@ return function()
             budget='Wave budget', patrol_count='Patrol count', patrol_size='Patrol size',
             encounter_cd='Reinf. CD', patrol_cd='Patrol CD',
             fast_corpse='Fast corpse decay (keep ragdolls)',
+            fast_corpse_short='Fast corpse decay', fast_corpse_hint='Keep ragdolls',
+            dynamic_spawn='Dynamic spawn compensation',
+            dynamic_spawn_short='Dynamic compensation',
+            console='EnemySpawnMultiplier', console_hint='by Natsun',
+            spawn_section='01 / SPAWN PARAMETERS', assist_section='02 / ASSIST CONTROLS',
+            composition_section='03 / REINFORCEMENT MIX',
+            heavy_short='HEAVY FOCUS', light_medium_short='LIGHT / MEDIUM', native_short='VANILLA',
+            heavy_hint='Favor heavy units', light_medium_hint='Favor light / medium units', native_hint='Original template weights',
+            enabled='ON', disabled='OFF',
             heavy='Heavy units (more heavy enemies)', light_medium='Light / medium units',
             native='Vanilla (original template weights)', presets='Composition preset',
             apply='Apply', reset='Reset', export='Export game logs', language_button='中文',
@@ -50,6 +69,7 @@ return function()
             encounter_cd_desc='Target reinforcement interval in seconds. 30 uses vanilla pacing.',
             patrol_cd_desc='Approximate patrol interval in seconds, mapped to a rate curve. 30 uses vanilla pacing.',
             fast_corpse_desc='Speed up corpse decay while keeping ragdolls; disabling restores original values.',
+            dynamic_spawn_desc='',
             preset_desc='Reinforcement template weights: heavy, light / medium, or vanilla.',
             language_desc='ESM language. F8 updates immediately; reopen the escape menu to refresh MODS text.',
         },
@@ -63,9 +83,8 @@ return function()
         return true
     end
 
-    -- Width fits the full 'EnemySpawnMultiplier v23 by Natsun' title plus the
-    -- toggle hint on the same row.
-    M.CLIENT_W, M.CLIENT_H = 580, 500
+    M.CLIENT_W, M.CLIENT_H = 680, 640
+    M.HEADER_H = 72
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
     M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
@@ -84,7 +103,7 @@ return function()
     local DEFAULTS = {
         budget = 2.0, patrol_count = 1.0, patrol_size = 1.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
-        fast_corpse = true, language = 'zh',
+        fast_corpse = true, dynamic_spawn = true, language = 'zh',
     }
 
     local SLIDER_LABELS = {
@@ -97,6 +116,7 @@ return function()
     -- Simple on/off rows rendered as checkboxes, below the sliders.
     local CHECKBOX_LABELS = {
         {key = 'fast_corpse'},
+        {key = 'dynamic_spawn'},
     }
 
     local RADIO_LABELS = {
@@ -119,39 +139,31 @@ return function()
             sliders[index] = {
                 key = def.key, label = M.text(def.key), kind = def.kind or 'multiplier',
                 min = def.min, max = def.max, steps = def.steps,
-                x = 24, y = 52 + (index - 1) * 42, w = M.CLIENT_W - 48, h = 34,
+                x = 36, y = 112 + (index - 1) * 42, w = M.CLIENT_W - 72, h = 36,
             }
             local item = sliders[index]
-            item.track_x, item.track_w = item.x + 126, item.w - 126 - 88
-            item.track_y = item.y + 16
+            item.track_x, item.track_w = item.x + 166, item.w - 166 - 84
+            item.track_y = item.y + 18
         end
-        -- Checkbox rows sit directly under the slider block; the preset block
-        -- follows them. Everything is derived so adding a slider or a checkbox
-        -- cannot silently overlap what is below it.
-        local last_slider = sliders[#sliders]
         local checkboxes = {}
         for index, def in ipairs(CHECKBOX_LABELS) do
             checkboxes[index] = {key = def.key, label = M.text(def.key),
-                                 x = 28, y = last_slider.y + last_slider.h + 8 + (index - 1) * 28,
-                                 w = M.CLIENT_W - 56, h = 24}
+                                 x = 32 + (index - 1) * 316, y = 372,
+                                 w = 300, h = 44}
         end
-        local last_checkbox = checkboxes[#checkboxes] or last_slider
-        M.PRESET_HEADER_Y = last_checkbox.y + last_checkbox.h + 6
-        local presets_y = M.PRESET_HEADER_Y + 24
+        M.PRESET_HEADER_Y = 428
         local radios = {}
         for index, def in ipairs(RADIO_LABELS) do
-            radios[index] = {key = 'preset', value = def.value, label = M.text(def.value),
-                             x = 28, y = presets_y + (index - 1) * 28,
-                             w = M.CLIENT_W - 56, h = 24}
+            radios[index] = {key = 'preset', value = def.value, label = M.text(def.value..'_short'),
+                             x = 32 + (index - 1) * 212, y = 456, w = 192, h = 46}
         end
-        local last_radio = radios[#radios]
-        local buttons_y = last_radio.y + last_radio.h + 16
+        local buttons_y = 524
         M.BUTTONS_Y = buttons_y
         local buttons = {
-            {id = 'apply', label = M.text('apply'), x = 24, y = buttons_y, w = 92, h = 32, accent = true},
-            {id = 'reset', label = M.text('reset'), x = 128, y = buttons_y, w = 92, h = 32},
-            {id = 'export', label = M.text('export'), x = 232, y = buttons_y, w = 168, h = 32},
-            {id = 'language', label = M.text('language_button'), x = 412, y = buttons_y, w = 144, h = 32},
+            {id = 'apply', label = M.text('apply'), x = 32, y = buttons_y, w = 148, h = 40, accent = true},
+            {id = 'reset', label = M.text('reset'), x = 192, y = buttons_y, w = 112, h = 40},
+            {id = 'export', label = M.text('export'), x = 316, y = buttons_y, w = 180, h = 40},
+            {id = 'language', label = M.text('language_button'), x = 508, y = buttons_y, w = 140, h = 40},
         }
         return {sliders = sliders, checkboxes = checkboxes, radios = radios, buttons = buttons}
     end
@@ -229,6 +241,7 @@ return function()
             encounter_cd_seconds = M.pending.encounter_cd,
             patrol_cd_seconds = M.pending.patrol_cd,
             fast_corpse = M.pending.fast_corpse,
+            dynamic_spawn = M.pending.dynamic_spawn,
             preset = M.pending.preset,
         }
     end
@@ -272,6 +285,7 @@ return function()
         if type(patch.fast_corpse) == 'boolean' then
             M.pending.fast_corpse = patch.fast_corpse
         end
+        M.pending.dynamic_spawn=patch.dynamic_spawn_enabled~=false
         if not patch.template_bias_enabled then
             M.pending.preset = 'native'
         elseif patch.template_bias_light >= patch.template_bias_heavy then
@@ -323,6 +337,7 @@ return function()
             M.pending.fast_corpse = fast_corpse
             changed = true
         end
+        if type(settings.dynamic_spawn)=='boolean' then M.pending.dynamic_spawn=settings.dynamic_spawn;changed=true end
         local preset = settings.preset
         if preset == 'heavy' or preset == 'light_medium' or preset == 'native' then
             M.pending.preset = preset
@@ -357,7 +372,7 @@ return function()
         for _, item in ipairs(widgets.buttons) do
             if M.inside(x, y, item) then return 'button', item end
         end
-        if y < 40 then return 'title' end
+        if y >=0 and y < M.HEADER_H then return 'title' end
         return nil
     end
 

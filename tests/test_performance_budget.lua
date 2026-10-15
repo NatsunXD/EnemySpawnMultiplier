@@ -59,6 +59,13 @@ director_present=false;assert(patch.apply(api,game))
 mission(faction_caps(64,500),100,50);fill_config(20,40,8,14,10,30);candidates(64)
 for _=1,6 do assert(patch.apply(api,game)) end
 budget('hash, 64 candidates',125)
+-- Include the new full-curve path in the measured no-op budget. No population
+-- sampler or live game calls are needed to exercise this data writer.
+patch.dynamic_curve_policy='unit_all_half_extraction'
+patch.dynamic={progress_enabled=true,reset=function() end,update=function() end}
+for _=1,6 do assert(patch.apply(api,game)) end
+budget('all curves, hash, 64 candidates',145)
+patch.dynamic=nil;patch.dynamic_curve_policy=nil
 -- Many owner transitions must hit a finite retention ceiling without recycling
 -- any object which native code may still reference.
 for i=1,220 do

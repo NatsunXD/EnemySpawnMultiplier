@@ -796,8 +796,8 @@ end}, {__index = _G})
 entry_env._G = entry_env
 local entry_chunk = assert(loadfile(build .. '/entry.lua')); setfenv(entry_chunk, entry_env)
 assert(entry_chunk() == 'implementation-loaded')
-assert(required_name == 'mods/cowboybingus/enemy_spawn_multiplier_impl' and required_count == 1)
-pass('v15 discovery entry preserves the legacy resource name and forwards once')
+assert(required_name == 'mods/natsun/enemy_spawn_multiplier_impl' and required_count == 1)
+pass('v15 discovery entry uses the Natsun resource namespace and forwards once')
 
 director_present = false
 assert(patch.apply(api, game))

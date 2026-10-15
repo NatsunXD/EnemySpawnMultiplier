@@ -22,13 +22,16 @@ ffi.cdef [[
 
 local user32, gdi32, kernel32 = ffi.load('user32'), ffi.load('gdi32'), ffi.load('kernel32')
 local create_model = assert(loadfile(source .. '/panel_model.lua'))()
+if arg[5]=='local_test' then
+    create_model=assert(loadfile(source..'/experiments/local_panel_model.lua'))()(create_model)
+end
 -- The instrumented copy in build/ has paint traces removed for this capture.
 local create_panel = assert(loadfile(source .. '/panel.lua'))()
 local patch = {cooldown_fast_rate = 3.0, patrol_cooldown_fast_rate = 6.0, cooldown_fast_seconds = 2.0, cooldown_slow_seconds = 30.0,
                configure = function() return true end}
 local panel = assert(create_panel(create_model, patch, {
     log = function() end, state = {active = false},
-    title = 'EnemySpawnMultiplier v23 by Natsun',
+    title = 'EnemySpawnMultiplier v24 by Natsun',
 }))
 
 user32.ShowWindow(panel.window, 5)
@@ -36,9 +39,11 @@ user32.InvalidateRect(panel.window, nil, 1)
 user32.UpdateWindow(panel.window)
 -- Show the state just after a successful Apply, which is the path that used to
 -- crash the panel out of existence.
-panel.model.pending.budget, panel.model.pending.patrol_count = 3.5, 4.0
-panel.model.pending.patrol_size, panel.model.pending.preset = 1.8, 'light_medium'
-panel.model.pending.encounter_cd, panel.model.pending.patrol_cd = 2.0, 18.0
+if arg[4]~='default' then
+    panel.model.pending.budget, panel.model.pending.patrol_count = 3.5, 4.0
+    panel.model.pending.patrol_size, panel.model.pending.preset = 1.8, 'light_medium'
+    panel.model.pending.encounter_cd, panel.model.pending.patrol_cd = 2.0, 18.0
+end
 assert(panel.apply())
 assert(panel.set_language(arg[3] or 'zh'))
 -- The button handler repaints after Apply; mirror that so the capture shows the

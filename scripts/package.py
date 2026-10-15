@@ -29,7 +29,12 @@ def package_release(root: Path, build: Path, report: dict) -> Path:
         release_version = 'v' + str(report.get('version') or report['revision']).rsplit('v', 1)[-1]
     display_name = report['name'] + ' - ' + release_version
     release_stem = report['name'].replace(' ', '-') + '-' + release_version
-    files[slug + '-README.txt'] = (root / 'INSTALL.txt').read_bytes()
+    suffix=report.get('release_suffix')
+    if suffix:
+        if not suffix.isascii() or not suffix.replace('-','').replace('_','').isalnum():
+            raise ValueError('Release suffix must be an ASCII filename token')
+        release_stem += '-' + suffix
+    files[slug + '-README.txt'] = (root / report.get('readme', 'INSTALL.txt')).read_bytes()
     thumbnail = root / 'assets/thumbnail.png'
     if thumbnail.is_file():
         files['thumbnail.png'] = thumbnail.read_bytes()
@@ -41,6 +46,8 @@ def package_release(root: Path, build: Path, report: dict) -> Path:
         'runtime_verified': False,
         'files': {name: digest(data) for name, data in files.items()},
     }
+    if suffix:
+        provenance['release_suffix']=suffix
     for key in ('requires', 'optional_requires', 'provides', 'loader_integration', 'data_change', 'shared_configuration', 'performance_budget'):
         if key in report:
             provenance[key] = report[key]

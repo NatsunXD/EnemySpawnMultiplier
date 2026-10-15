@@ -4,7 +4,9 @@
 
 这是一个用于调整《绝地潜兵 2》敌人生成参数的模组。目前只维护 Panel 版本。
 
-v23 按 F8 打开配置面板，可调整增援预算、巡逻数量、巡逻规模以及增援和巡逻冷却。安装可选的 [Mod Options Menu](https://github.com/CowboyBingus/ModOptionsMenu/releases) v1.1 或更新版本及 Bingus Shared Loader v18+ 后，也可以在暂停菜单的 MODS → Enemy Spawn Multiplier 中修改同一份配置；不需要 HD2Runtime。
+v24 按 F8 打开配置面板，可调整增援预算、巡逻数量、巡逻规模以及增援和巡逻冷却。安装可选的 [Mod Options Menu](https://github.com/CowboyBingus/ModOptionsMenu/releases) v1.1 或更新版本及 Bingus Shared Loader v18+ 后，也可以在暂停菜单的 MODS → Enemy Spawn Multiplier 中修改同一份配置；不需要 HD2Runtime。
+
+“动态生成补偿”默认开启，同时管理任务进度、撤离加成与巡逻压力反馈：65 个任务进度倍率固定为 1.00，撤离额外加成减半，靠近撤离点时的巡逻速率倍率限制在 1.00–1.20。每秒采样一次，连续三次有效 `H=Q+B>100` 后，巡逻队数和规模仅保留超出 1x 部分的 10%，随即在 20 秒内线性恢复；巡逻冷却速率保留用户值的 75%，维持 6 秒后用 4 秒恢复。再次触发会重置两组计时。自动调整不改变面板显示或保存值；S70 仅作日志观测。此机制保留游戏原生人口门槛，离线测试不能证明实机稳定性。
 
 两边都在点击“应用 / APPLY”后提交，并同步到另一边。另一边同字段的草稿会以最新已应用值为准，其他字段尚未应用的编辑保留。MODS 一次 APPLY 的多个字段只提交、保存一次。未安装菜单或菜单不可用时，F8 面板仍可独立使用。
 
@@ -28,7 +30,9 @@ F8 面板右下角的 English / 中文按钮即时切换语言；MODS 菜单也�
 
 Only the Panel version is maintained. Press F8 to open the configuration panel and adjust the reinforcement budget, patrol count, patrol size, reinforcement cooldown and patrol cooldown. Patrol size ranges from `0.1x` to `2.0x` and defaults to `1.0x`.
 
-v23 also supports the optional [Mod Options Menu](https://github.com/CowboyBingus/ModOptionsMenu/releases) v1.1+ with Bingus Shared Loader v18+. Open MODS → Enemy Spawn Multiplier in the escape menu. HD2Runtime is not required. Both interfaces commit on Apply and synchronize submitted fields; unrelated pending edits stay staged. F8 works without the menu.
+v24 also supports the optional [Mod Options Menu](https://github.com/CowboyBingus/ModOptionsMenu/releases) v1.1+ with Bingus Shared Loader v18+. Open MODS → Enemy Spawn Multiplier in the escape menu. HD2Runtime is not required. Both interfaces commit on Apply and synchronize submitted fields; unrelated pending edits stay staged. F8 works without the menu.
+
+Dynamic spawn compensation defaults ON. It locks all 65 mission progression multipliers to 1.00, halves extraction bonuses above 1, and clamps the patrol extraction-distance rate to 1.00–1.20. Three consecutive valid 1-second samples with `H=Q+B>100` retain 10% of the patrol count/size bonus above 1x, then immediately restore it linearly over 20 seconds. Patrol rate retains 75% of the user value for 6 seconds and recovers over 4 seconds. A new trigger restarts both timers. Automatic values stay out of the UI and saved profile; S70 is diagnostic only. Native population gates remain active; offline checks do not establish live stability.
 
 Use the English / 中文 button in F8 or the Language option in MODS. The choice is synchronized and saved. F8 text changes immediately; reopen the escape menu to refresh MODS text. A language change preserves gameplay settings and unapplied F8 drafts. Menu v1.0 can synchronize values but shows static English text.
 

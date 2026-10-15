@@ -15,14 +15,18 @@ python -B scripts/build.py
 ```
 
 The builder verifies the supported EXE and game.dll hashes, compiles the maintained
-panel build, runs synthetic memory checks, and inspects the archive in Python. Run
-`python -B scripts/build.py` to build
-`releases/Enemy-Spawn-Multiplier-Panel-v23.zip` by default (or with
-`python -B scripts/build.py panel-menus`). `panel` and `panel-local` remain
-available for the existing development profiles. The builder does
-not install or launch the game.
+v24 combined-compensation build, runs synthetic memory checks, and inspects the
+archive in Python. `python -B scripts/build.py` (or the explicit
+`python -B scripts/build.py dynamic-compensation`) builds
+`releases/Enemy-Spawn-Multiplier-v24-H100-3Samples-10Pct-20s.zip`.
+`panel-menus`, `panel`, `panel-local` and `panel-performance` retain the older
+progression-only experiment. `local-soft-limit-test` retains the isolated legacy
+pressure test; neither profile uses the current combined-compensation rules.
+The builder does not install or launch the game. All profiles package the tracked
+root `INSTALL.txt`; local `docs`, `research` and release artifacts are not needed
+as build inputs and are ignored by Git.
 
-This package requires the official Bingus Shared Loader v15 or newer. The archive exposes a plaintext `mods/cowboybingus/enemy_spawn_multiplier` discovery entry and keeps the compiled implementation in `mods/cowboybingus/enemy_spawn_multiplier_impl`. The v15 loader discovers the entry without a coordinator-list edit; the stable entry name also remains compatible with legacy explicit registration.
+This package requires the official Bingus Shared Loader v15 or newer. The archive exposes a plaintext `mods/natsun/enemy_spawn_multiplier` discovery entry and keeps the compiled implementation in `mods/natsun/enemy_spawn_multiplier_impl`. The v15 loader discovers the entry without a coordinator-list edit. Legacy explicit registrations using the previous namespace must be updated.
 
 The MODS settings integration is optional: Mod Options Menu v1.1+ and loader
 v18+ provide translated native rows. There is no HD2Runtime dependency.

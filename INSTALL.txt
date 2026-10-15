@@ -1,67 +1,55 @@
-Enemy Spawn Multiplier
-
-Close the game before installing or upgrading. Remove previous Enemy Spawn
-Multiplier entries, then install exactly one package. All packages share one
-resource ID and cannot be combined.
-
-What the packages do
---------------------
-
-- Native Composition keeps the game's native Encounter composition weights and
-  raises overall spawn pressure.
-- Light-Medium Bias raises overall spawn pressure and steers Encounter
-  composition toward lighter and medium units.
-- Fast Cadence shifts the emphasis from wave size to cadence and composition.
-  Enemy reinforcement arrives on a much shorter cooldown. Both the wave
-  composition and its point budget are steered toward heavier units, so a wave
-  is made of fewer but heavier units rather than being larger overall. Patrols
-  appear more frequently, in greater numbers, and in larger groups.
-
-The mod changes writable private data only. A game update does not by itself
-disable it: the build hash is reported to the log but no longer blocks the
-patch, and every write is validated against the live layout before it lands.
-It does not modify executable code and does not call native spawn functions.
-Native population gates, position checks, template availability and queue
-processing all remain active.
+EnemySpawnMultiplier v24 by Natsun
 
 Install
 -------
+Close the game, remove the previous ESM package, then deploy exactly one package
+with HDArsenal or HD2MM. Requires the official Bingus Shared Loader v15+:
+https://github.com/CowboyBingus/BingusSharedLoader/releases
 
-1. Close the game.
-2. Install and enable the official Bingus Shared Loader v15 or newer
-   (https://github.com/CowboyBingus/BingusSharedLoader/releases) and give it the
-   winning startup priority.
-3. Import exactly one of the packages published on the releases page into
-   HDArsenal or HD2MM.
-4. Deploy, then start the game.
+Press F8 for settings. Optional Mod Options Menu v1.1+ with loader v18+ provides
+the same settings in MODS. Both interfaces apply, synchronize and save settings
+to %LOCALAPPDATA%/EnemySpawnMultiplier.cfg. Chinese and English are supported.
 
-Diagnostics are appended to %LOCALAPPDATA%/EnemySpawnMultiplier.log.
+Default build: Dynamic spawn compensation
+----------------------------------------
+The switch defaults ON and controls all of the following:
+- All 65 mission progression multipliers are locked to exactly 1.00.
+- Extraction bonuses above 1 are halved: 1.20 becomes 1.10.
+- Patrol extraction-distance refresh-rate multipliers are limited to 1.00-1.20.
+- Three consecutive valid 1-second samples with H=Q+B >100 reduce patrol count
+  and size to 1+(user-1)*0.10. User values at or below 1 stay unchanged.
+  Count and size immediately recover linearly over 20 seconds.
+- Patrol rate becomes user*0.75, holds for 6 seconds, then recovers over 4 seconds.
+  A new trigger restarts both the 20-second quantity and 10-second rate timers.
 
-Panel v23 - F8 and MODS settings
-------------------------------
+Switch OFF cancels the response and restores native progression/extraction
+curves. Background changes never move sliders or enter the saved profile.
+Saved ON/OFF preferences remain respected on upgrade.
 
-F8 keeps the existing configuration panel. Optionally install Mod Options Menu
-v1.1 or newer (https://github.com/CowboyBingus/ModOptionsMenu/releases) with
-Bingus Shared Loader v18+ to edit the same profile under the escape menu's
-MODS tab, category Enemy Spawn Multiplier. HD2Runtime is not required.
+S70 and H100 diagnostics continue with the switch OFF. S70 does not control
+parameters. H omits candidate squad size and does not count actual rejections.
 
-Both interfaces submit on Apply. Submitted fields synchronize to the other
-interface; unrelated unapplied fields remain staged. The language button in F8
-and Language option in MODS switch between Chinese and English. F8 refreshes
-immediately; close and reopen the escape menu to refresh MODS text. Switching
-language does not apply staged spawn settings.
+Other build profiles
+--------------------
+Explicit panel/panel-menus/panel-local/panel-performance builds retain the older
+progression-only experiment: initial-tier compensation without pressure sampling.
+The local-soft-limit-test build retains its isolated legacy test: always-on
+initial-tier compensation, with a separate optional H100 response (three H>95
+samples or one H>100 sample; count/size 1x, half rate for 10 seconds).
+These profiles differ from the default combined-compensation package above.
 
-Parameters and language are saved to %LOCALAPPDATA%/EnemySpawnMultiplier.cfg.
-This profile takes priority over old menu saves on startup. Without a usable
-ESM profile, the menu's saved values can supply the initial profile. Previous
-ESM cfg files remain readable. Without the menu, F8 and saved settings work.
-Menu v1.0 also synchronizes values, but has static English labels.
+Runtime scope and diagnostics
+-----------------------------
+Compensation is enabled only on the supported Steam 25480438 / 1.8.46015.0
+hashes. The mod changes validated private data, without executable-code patches
+or native spawn calls. Native population gates remain active. Public matchmaking
+and a used host SOS beacon gate spawn writes.
 
-This v23 artifact has passed offline and Win32/API integration tests. In-game
-validation of the exact package remains pending.
+Log: %LOCALAPPDATA%/EnemySpawnMultiplier.log
+The panel can export diagnostics to the Desktop.
+Addon: mods/natsun/enemy_spawn_multiplier
+Offline tests do not establish in-game stability of the exact package.
 
 Uninstall
 ---------
-
-Close the game, disable the mod, purge deployment, then redeploy the remaining
-mods.
+Close the game, disable the mod, purge deployment, then redeploy remaining mods.

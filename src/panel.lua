@@ -156,6 +156,8 @@ return function(create_model, patch, callbacks)
         typedef int32_t (*ESP_Rectangle_t)(void *, int32_t, int32_t, int32_t, int32_t);
         typedef int32_t (*ESP_SetTextColor_t)(void *, uint32_t);
         typedef int32_t (*ESP_SetBkMode_t)(void *, int32_t);
+        typedef void *(*ESP_CreateFont_t)(int32_t,int32_t,int32_t,int32_t,int32_t,
+            uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,const char *);
     ]]
 
     local function bind_export(lib, export, typedef_name)
@@ -209,6 +211,7 @@ return function(create_model, patch, callbacks)
         Rectangle = 'ESP_Rectangle_t',
         SetTextColor = 'ESP_SetTextColor_t',
         SetBkMode = 'ESP_SetBkMode_t',
+        CreateFontA = 'ESP_CreateFont_t',
     }) do
         gdi32[export] = bind_export(gdi32_lib, export, typedef_name)
     end
@@ -254,18 +257,32 @@ return function(create_model, patch, callbacks)
     local MK_LBUTTON = 1
 
     local function rgb(r, g, b) return r + g * 256 + b * 65536 end
-    local C_BG       = rgb(0x1E, 0x1E, 0x1E)
-    local C_BAR      = rgb(0x27, 0x27, 0x27)
-    local C_TITLE    = rgb(0xF2, 0xF2, 0xF2)
-    local C_LABEL    = rgb(0xC2, 0xC2, 0xC2)
-    local C_DIM      = rgb(0x8A, 0x8A, 0x8A)
-    local C_TRACK    = rgb(0x3A, 0x3A, 0x3A)
-    local C_ACCENT   = rgb(0x4A, 0x9E, 0xFF)
-    local C_KNOB     = rgb(0xFF, 0xFF, 0xFF)
-    local C_BUTTON   = rgb(0x33, 0x33, 0x33)
-    local C_OK       = rgb(0x6E, 0xC7, 0x7A)
-    local C_WARN     = rgb(0xE0, 0xB4, 0x5A)
-    local C_DANGER   = rgb(0xE5, 0x5B, 0x5B)
+    local C_BG       = rgb(0x10, 0x13, 0x15)
+    local C_BAR      = rgb(0x1A, 0x1E, 0x20)
+    local C_TITLE    = rgb(0xF1, 0xF2, 0xE9)
+    local C_LABEL    = rgb(0xD1, 0xD5, 0xCC)
+    local C_DIM      = rgb(0xA2, 0xAD, 0xAA)
+    local C_TRACK    = rgb(0x46, 0x4D, 0x4D)
+    local C_ACCENT   = rgb(0xF4, 0xD8, 0x35)
+    local C_BUTTON   = rgb(0x28, 0x2E, 0x30)
+    local C_OK       = rgb(0xBF, 0xD4, 0x9C)
+    local C_WARN     = rgb(0xE4, 0xC9, 0x69)
+    local C_DANGER   = rgb(0xFF, 0x87, 0x76)
+    local C_BORDER   = rgb(0x39, 0x42, 0x43)
+    local C_SELECTED = rgb(0x32, 0x33, 0x25)
+    local C_WARNING  = rgb(0x35, 0x21, 0x1E)
+    local C_INK      = rgb(0x14, 0x18, 0x19)
+
+    -- Three fixed fonts, created once and released with the window. Private
+    -- function pointers preserve the shared-FFI collision protection.
+    local fonts = {}
+    for name,spec in pairs({body={16,600},small={13,500},heading={26,700}}) do
+        local font=gdi32.CreateFontA(-spec[1],0,0,0,spec[2],0,0,0,1,0,0,5,0,'Microsoft YaHei UI')
+        if font~=nil then fonts[name]=font end
+    end
+    local function release_fonts()
+        for name,font in pairs(fonts) do gdi32.DeleteObject(font);fonts[name]=nil end
+    end
 
     local CLIENT_W, CLIENT_H = model.CLIENT_W, model.CLIENT_H
 
@@ -453,7 +470,7 @@ return function(create_model, patch, callbacks)
         gdi32.DeleteObject(handle)
     end
 
-    local function draw_text(dc, text, x, y, w, h, color, center)
+    local function draw_text(dc, text, x, y, w, h, color, center, font)
         if type(text) ~= 'string' or text == '' then return end
         local buffer, length = wide(text)
         if not buffer then return end
@@ -461,18 +478,23 @@ return function(create_model, patch, callbacks)
         gdi32.SetTextColor(dc, color)
         gdi32.SetBkMode(dc, TRANSPARENT)
         local format = center and (DT_CENTER + DT_VCENTER + DT_SINGLELINE) or (DT_LEFT + DT_VCENTER + DT_SINGLELINE)
+        local handle=fonts[font or 'body']
+        local previous=handle and gdi32.SelectObject(dc,handle)
         user32.DrawTextW(dc, buffer, length, rect, format)
+        if previous then gdi32.SelectObject(dc,previous) end
     end
 
-    local function rounded(dc, x, y, w, h, radius, color)
-        local fill_brush, edge_pen = brush(color), gdi32.CreatePen(0, 1, color)
-        local old_brush = gdi32.SelectObject(dc, fill_brush)
-        local old_pen = gdi32.SelectObject(dc, edge_pen)
-        gdi32.RoundRect(dc, x, y, x + w, y + h, radius, radius)
-        gdi32.SelectObject(dc, old_brush)
-        gdi32.SelectObject(dc, old_pen)
-        gdi32.DeleteObject(edge_pen)
-        gdi32.DeleteObject(fill_brush)
+    local function frame(dc,x,y,w,h,edge,background)
+        fill(dc,x,y,w,h,edge)
+        fill(dc,x+1,y+1,w-2,h-2,background)
+    end
+    local function hover_key(kind,item)
+        return kind..':'..tostring(item.id or item.key)..':'..tostring(item.value or '')
+    end
+    local function hovered(kind,item) return panel.hover==hover_key(kind,item) end
+    local function section(dc,label,y)
+        draw_text(dc,label,32,y,300,22,C_ACCENT,false,'small')
+        fill(dc,344,y+10,304,1,C_BORDER)
     end
 
     local function paint(window)
@@ -496,81 +518,80 @@ return function(create_model, patch, callbacks)
         local old_bitmap = gdi32.SelectObject(memory, bitmap)
 
         fill(memory, 0, 0, width, height, C_BG)
-        fill(memory, 0, 0, width, 40, C_BAR)
-        draw_text(memory, TITLE, 16, 0, width - 140, 40, C_TITLE)
+        frame(memory,0,0,width,height,C_BORDER,C_BG)
+        fill(memory, 1, 1, width-2, model.HEADER_H-1, C_BAR)
+        fill(memory,0,0,width,3,C_ACCENT)
+        fill(memory,20,17,4,35,C_ACCENT)
+        draw_text(memory, model.text('console'), 32, 10, width - 144, 34, C_TITLE,false,'heading')
+        draw_text(memory, model.text('console_hint'), 32, 44, width-160, 20,C_DIM,false,'small')
+        draw_text(memory, (TITLE:match('[vV][%d%.]+') or ''):lower(), width-108, 52, 88, 16,C_DIM,true,'small')
         panel.toggle_hint = model.text(panel.custom_binding and 'custom_key' or 'toggle')
-        draw_text(memory, panel.toggle_hint, width - 124, 0, 108, 40, C_DIM)
+        frame(memory,width-108,22,88,28,C_TRACK,C_BG)
+        draw_text(memory, panel.toggle_hint, width - 108, 22, 88, 28, C_LABEL,true,'small')
+        frame(memory,20,84,width-40,246,C_BORDER,C_BAR)
+        section(memory,model.text('spawn_section'),88)
 
         local widgets = model.layout()
         for _, item in ipairs(widgets.sliders) do
-            draw_text(memory, item.label, item.x, item.y, 120, item.h, C_LABEL)
+            if hovered('slider',item) or (panel.drag_slider and panel.drag_slider.key==item.key) then
+                fill(memory,28,item.y,width-56,item.h,C_BUTTON)
+            end
+            draw_text(memory, item.label, item.x, item.y, 128, item.h, C_LABEL)
             local track_x, track_w, track_y = item.track_x, item.track_w, item.track_y
-            fill(memory, track_x, track_y - 2, track_w, 5, C_TRACK)
+            fill(memory, track_x, track_y - 2, track_w, 4, C_TRACK)
+            for tick=0,5 do
+                fill(memory,track_x+math.floor(track_w*tick/5),track_y+5,1,4,C_TRACK)
+            end
             local ratio = model.slider_ratio(item)
             local knob_x = track_x + math.floor(ratio * track_w + 0.5)
-            fill(memory, track_x, track_y - 2, math.max(1, knob_x - track_x), 5, C_ACCENT)
-            local knob = brush(C_KNOB)
-            local old = gdi32.SelectObject(memory, knob)
-            gdi32.Ellipse(memory, knob_x - 7, track_y - 9, knob_x + 7, track_y + 5)
-            gdi32.SelectObject(memory, old)
-            gdi32.DeleteObject(knob)
+            fill(memory, track_x, track_y - 2, math.max(1, knob_x - track_x), 4, C_ACCENT)
+            frame(memory,knob_x-5,track_y-9,10,18,C_INK,C_ACCENT)
             if item.kind == 'cooldown' then
-                -- Ends only: the numeric seconds live on the track itself.
-                draw_text(memory, model.text('fast'), track_x - 42, item.y, 32, item.h, C_DIM, true)
-                draw_text(memory, model.text('slow'), track_x + track_w + 6, item.y, 40, item.h, C_DIM, true)
+                draw_text(memory, model.text('fast'), track_x - 38, item.y, 32, item.h, C_DIM, true,'small')
+                draw_text(memory, model.text('slow'), track_x + track_w + 12, item.y, 60, item.h, C_DIM, true,'small')
             else
                 -- The value turns red while this row is over its risk threshold, so
                 -- the cause of the corner warning is visible at a glance.
                 local value_color = model.at_risk(item) and C_DANGER or C_TITLE
-                draw_text(memory, model.format(item), item.x + item.w - 72, item.y, 72, item.h, value_color)
+                frame(memory,item.x+item.w-62,item.y+5,62,26,C_BORDER,C_BG)
+                draw_text(memory, model.format(item), item.x + item.w - 62, item.y+5, 62, 26, value_color,true)
             end
         end
 
+        section(memory,model.text('assist_section'),344)
         for _, item in ipairs(widgets.checkboxes or {}) do
             local checked = model.pending[item.key] and true or false
-            local cx, cy = item.x + 4, item.y + item.h / 2
-            -- Square check box. A filled accent square reads clearly at this size
-            -- and avoids relying on a glyph the UI font may not carry.
-            local box_brush = brush(checked and C_ACCENT or C_TRACK)
-            local old_box = gdi32.SelectObject(memory, box_brush)
-            gdi32.Rectangle(memory, cx - 7, cy - 7, cx + 7, cy + 7)
-            gdi32.SelectObject(memory, old_box)
-            gdi32.DeleteObject(box_brush)
-            draw_text(memory, item.label, item.x + 24, item.y, item.w - 24, item.h,
-                      checked and C_TITLE or C_LABEL)
+            frame(memory,item.x,item.y,item.w,item.h,hovered('checkbox',item) and C_ACCENT or C_BORDER,C_BAR)
+            local label=model.text(item.key=='fast_corpse' and 'fast_corpse_short' or 'dynamic_spawn_short')
+            local label_y=item.key=='fast_corpse' and 3 or 11
+            draw_text(memory,label,item.x+12,item.y+label_y,item.w-60,22,checked and C_TITLE or C_LABEL)
+            if item.key=='fast_corpse' then
+                draw_text(memory,model.text('fast_corpse_hint'),item.x+12,item.y+24,item.w-24,17,C_DIM,false,'small')
+            end
+            local badge_y=item.key=='fast_corpse' and 7 or 14
+            fill(memory,item.x+item.w-42,item.y+badge_y,32,17,checked and C_ACCENT or C_TRACK)
+            draw_text(memory,model.text(checked and 'enabled' or 'disabled'),item.x+item.w-42,item.y+badge_y,
+                32,17,checked and C_INK or C_TITLE,true,'small')
         end
 
-        draw_text(memory, model.text('presets'), 24, model.PRESET_HEADER_Y, 170, 20, C_DIM)
-        -- Always-visible lobby policy notice (not conditional on privacy status).
-        draw_text(memory, model.text('wild_lobby'), 204, model.PRESET_HEADER_Y,
-                  CLIENT_W - 228, 20, C_DANGER)
+        section(memory,model.text('composition_section'),model.PRESET_HEADER_Y)
         for _, item in ipairs(widgets.radios) do
             local selected = model.pending[item.key] == item.value
-            local cx, cy = item.x + 8, item.y + item.h / 2
-            local ring = brush(C_TRACK)
-            local old = gdi32.SelectObject(memory, ring)
-            gdi32.Ellipse(memory, cx - 8, cy - 8, cx + 8, cy + 8)
-            gdi32.SelectObject(memory, old)
-            gdi32.DeleteObject(ring)
-            if selected then
-                local dot = brush(C_ACCENT)
-                old = gdi32.SelectObject(memory, dot)
-                gdi32.Ellipse(memory, cx - 4, cy - 4, cx + 4, cy + 4)
-                gdi32.SelectObject(memory, old)
-                gdi32.DeleteObject(dot)
-            end
-            draw_text(memory, item.label, item.x + 26, item.y, item.w - 26, item.h,
-                      selected and C_TITLE or C_LABEL)
+            frame(memory,item.x,item.y,item.w,item.h,(selected or hovered('radio',item)) and C_ACCENT or C_BORDER,
+                selected and C_SELECTED or C_BAR)
+            if selected then fill(memory,item.x,item.y,4,item.h,C_ACCENT) end
+            draw_text(memory, item.label, item.x+14,item.y+3,item.w-24,22,selected and C_ACCENT or C_LABEL)
+            draw_text(memory, model.text(item.value..'_hint'),item.x+14,item.y+25,item.w-24,17,C_DIM,false,'small')
         end
 
         for _, item in ipairs(widgets.buttons) do
-            rounded(memory, item.x, item.y, item.w, item.h, 8, item.accent and C_ACCENT or C_BUTTON)
-            draw_text(memory, item.label, item.x, item.y, item.w, item.h, C_TITLE, true)
+            frame(memory,item.x,item.y,item.w,item.h,(item.accent or hovered('button',item)) and C_ACCENT or C_TRACK,
+                item.accent and C_ACCENT or C_BUTTON)
+            draw_text(memory,item.label,item.x,item.y,item.w,item.h,item.accent and C_INK or C_TITLE,true)
         end
 
         -- Prefer the transient apply result; otherwise state what the committed
         -- configuration will do, so "did it apply?" is never ambiguous.
-        -- Lobby policy is shown next to the preset header, not here.
         local footer, footer_color = nil, C_OK
         if runtime and runtime.active == false then
             footer, footer_color = model.text('waiting'), C_WARN
@@ -580,15 +601,19 @@ return function(create_model, patch, callbacks)
         if panel.status ~= '' and os.clock() < panel.status_until then
             footer, footer_color = panel.status, C_OK
         end
-        draw_text(memory, footer, 24, model.BUTTONS_Y + 36, CLIENT_W - 48, 22, footer_color)
+        fill(memory,32,576,width-64,1,C_BORDER)
+        fill(memory,32,589,5,5,footer_color)
+        draw_text(memory, footer, 46, 581, CLIENT_W - 78, 22, footer_color,false,'small')
 
         -- High-pressure warning at the bottom. It reflects the editor state, so it
         -- appears as soon as a slider crosses the threshold and clears when the
         -- player moves it back; Apply is not required.
         if model.pressure_warning() then
             local PRESSURE_WARNING = model.text('pressure')
-            draw_text(memory, PRESSURE_WARNING, 24, CLIENT_H - 24,
-                      CLIENT_W - 48, 22, C_DANGER, true)
+            fill(memory,20,CLIENT_H-32,width-40,24,C_WARNING)
+            fill(memory,20,CLIENT_H-32,3,24,C_DANGER)
+            draw_text(memory, PRESSURE_WARNING, 32, CLIENT_H - 32,
+                      CLIENT_W - 64, 24, C_DANGER,false,'small')
         end
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)
@@ -663,6 +688,9 @@ return function(create_model, patch, callbacks)
             return 0
         elseif message == WM_MOUSEMOVE then
             local x, y = packed_xy(lparam)
+            local kind,item=model.hit(x,y)
+            local hover=item and hover_key(kind,item) or nil
+            if hover~=panel.hover then panel.hover=hover;user32.InvalidateRect(window,nil,0) end
             if panel.drag_slider then
                 model.set_slider(panel.drag_slider, x)
                 user32.InvalidateRect(window, nil, 0)
@@ -712,10 +740,11 @@ return function(create_model, patch, callbacks)
         panel.window = user32.CreateWindowExA(
             WS_EX_TOPMOST + WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE,
             wndclass.class_name, TITLE, WS_POPUP,
-            120, 120, CLIENT_W, CLIENT_H, nil, nil, instance, nil)
+            80, 24, CLIENT_W, CLIENT_H, nil, nil, instance, nil)
         if panel.window == nil then error('panel_create_window_failed') end
     end)
     if not ok then
+        release_fonts()
         if unsubscribe then unsubscribe(); unsubscribe = nil end
         log('panel_unavailable', tostring(err))
         return nil, tostring(err)
@@ -774,6 +803,7 @@ return function(create_model, patch, callbacks)
         if unsubscribe then unsubscribe(); unsubscribe = nil end
         if panel.window then user32.DestroyWindow(panel.window) end
         panel.window = nil
+        release_fonts()
     end
 
     return panel

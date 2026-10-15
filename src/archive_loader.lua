@@ -1,5 +1,5 @@
 return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors,
-                create_store, create_diag, create_corpse, create_config, create_options, create_sos)
+                create_store, create_diag, create_corpse, create_config, create_options, create_sos, create_dynamic)
     if _G.EnemySpawnMultiplier then return end
     local state = {revision = build.revision, active = false, status = '', detail = '', elapsed = 1.0}
     _G.EnemySpawnMultiplier = state
@@ -273,6 +273,18 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     local identity, exe_hash, game_hash = build_identity(api, api.module(nil), game)
     state.build = identity
     state.exe_hash, state.game_hash = exe_hash, game_hash
+    if create_dynamic then
+        local built,module=pcall(create_dynamic)
+        if built and type(module)=='table' then
+            local made,session=pcall(module.create,api,patch,identity=='known_build',false)
+            if made and session then patch.dynamic=session end
+        end
+        log_line('dynamic_ready',patch.dynamic and (patch.dynamic.mode=='h100_compensation'
+            and 'ready; mode=h100_compensation H>95 x3 or H>100 hold_s=10 rate=half switch=soft_limit_and_progression diagnostics=70/100'
+            or patch.dynamic.mode=='local_h100_test'
+            and 'ready; mode=local_h100_test H>95 x3 or H>100 hold_s=10 rate=half progression=always_initial_tier'
+            or 'ready; mode=progression_only pressure_feedback=off sample_s=none progression=initial_tier') or 'unavailable')
+    end
     log_line(identity, string.format('exe=%s game=%s', exe_hash, game_hash))
     log_line('bb_ready', 'blackbox=on summary_s=30 flush_s=5 queue=32/16384 alerts=4/5s')
 
@@ -356,7 +368,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     -- patch must keep running even if no window can be created.
     local panel = nil
     if create_panel then
-        local panel_version = tostring(build.revision):match('v[%d%.]+') or 'v23'
+        local panel_version = tostring(build.revision):match('v[%d%.]+') or 'v24'
         -- The bindings bridge is optional and independent of the panel: if the
         -- Mod Bindings Menu addon is absent the provider simply never becomes
         -- ready and the panel keeps its built-in F8 default.
@@ -394,7 +406,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     end
 
     local previous = update
-    local stopped, elapsed = false, 0.1
+    local stopped, elapsed = false, 0
     local privacy_elapsed = 1.0
     local sos_elapsed = 1.9
     local SOS_INTERVAL = 2.0
@@ -412,6 +424,7 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         if stopped then return end
         elapsed = elapsed + ((type(dt) == 'number' and dt == dt and dt > 0) and dt or 0)
         if elapsed < 0.1 then return end
+        local step_dt=math.min(elapsed,1)
         elapsed = 0
         privacy_elapsed = privacy_elapsed + 0.1
         if privacy_elapsed >= 2.0 then
@@ -497,7 +510,17 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
                 called, accepted, reason, active = true, true, tostring(sos_reason or 'privacy_gate_sos'), false
             end
         else
+            patch.dynamic_dt=step_dt
             called, accepted, reason, active = pcall(patch.apply, api, game)
+        end
+        if patch.dynamic and (not live or lobby_gated) then patch.dynamic.reset() end
+        if patch.dynamic and patch.dynamic.event then
+            log_line('local_soft_limit',patch.dynamic.event)
+            patch.dynamic.event=nil
+        end
+        if patch.dynamic and patch.dynamic.observation_event then
+            log_line('local_gate_crossing',patch.dynamic.observation_event)
+            patch.dynamic.observation_event=nil
         end
         local upd_ms = (now_clock() - t0) * 1000.0
         blackbox.last_upd_ms = upd_ms
@@ -634,6 +657,26 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         if blackbox.summary_elapsed >= SUMMARY_INTERVAL then
             blackbox.summary_elapsed=0
             blackbox.component_gate_count=sample_component_gate()
+            local dynamic=patch.dynamic
+            local effective=dynamic and dynamic.effective
+            if effective then
+                local sample=dynamic.sample
+                local stats=dynamic.stats
+                if stats then
+                    log_line('local_gate_stats',string.format(
+                        'mission_samples=%d invalid=%d S70_ge70=%d H_gt95=%d H_gt100=%d peak_S70=%s peak_H=%s',
+                        stats.valid,stats.invalid,stats.s70_ge70,stats.h_gt95,stats.h_gt100,
+                        tostring(stats.peak_s70 or '-'),tostring(stats.peak_h or '-')))
+                end
+                log_line('bb_dynamic',string.format(
+                    'phase=%s valid=%s requested=%.2f/%.2f/%.2f effective=%.2f/%.2f/%.2f S70=%s H=%s Q=%s P=%s E=%s B=%s C=%s',
+                    tostring(effective.phase),tostring(sample~=nil),
+                    patch.modifier_patrol_count,patch.modifier_travelers_max_unit,patch.modifier_patrol_cooldown,
+                    effective.count,effective.size,effective.rate,
+                    tostring(sample and sample.s70),tostring(sample and sample.h),
+                    tostring(sample and sample.q),tostring(sample and sample.p),
+                    tostring(sample and sample.e),tostring(sample and sample.b),tostring(sample and sample.components)))
+            end
             log_line('bb_summary',string.format(
                 'total_avg_ms=%.3f total_max_ms=%.3f calls=%d patch_ms=%.3f suppressed=%d dropped=%d corpse=%s/%s/%s clone_bytes=%s components=%s/448',
                 blackbox.total_ms/math.max(1,blackbox.calls),blackbox.max_ms,blackbox.calls,

@@ -522,4 +522,252 @@ assert(ok_preset == false and preset_reason == 'preset_unknown')
 assert(patch.configure{budget = 99.0} == false)
 pass('rejected live settings leave the active configuration untouched')
 
+-- Integration: progression compensation changes only the five progression
+-- floats, keeps zero sentinels, restores on disabling, and never stacks.
+director_present=false;assert(patch.apply(api,game))
+mission(faction_caps(45,2000),100,600)
+fill_config(20,40,8,14,10,30,-1)
+assert(patch.configure{patrol_count=2,patrol_size=1.5,encounter_cd_seconds=30,patrol_cd_seconds=30,preset='native'})
+local cfg=director+patch.cfg_base_offset
+local blocks={0x164,0x1a0,0x1dc,0x3f8}
+for _,off in ipairs(blocks) do
+    put_f32(cfg+off,1.3)
+    for i=1,4 do put_f32(cfg+off+i*4,1.3+i*0.1) end
+    put_f32(cfg+off+3*4,0) -- native zero remains a zero
+    put_f32(cfg+off+5*4,2.2)
+end
+local create_dynamic=assert(loadfile(source..'/dynamic_spawn.lua'))()
+assert(patch.configure{dynamic_spawn=true})
+patch.dynamic=create_dynamic().create(api,patch,true)
+assert(patch.apply(api,game))
+for _,off in ipairs(blocks) do
+    local scale=off==0x1a0 and 2 or off==0x3f8 and 1.5 or 1
+    for i=0,4 do assert(approx(get_f32(cfg+off+i*4),(i==3 and 0 or 1.3*scale))) end
+    assert(approx(get_f32(cfg+off+5*4),2.2*scale))
+end
+local stable_writes=writes
+assert(patch.apply(api,game));assert(writes==stable_writes,'unchanged curves must not be rewritten')
+assert(patch.modifier_patrol_count==2 and patch.modifier_travelers_max_unit==1.5)
+assert(patch.dynamic.progress_enabled and patch.dynamic.effective.phase=='progression_only')
+assert(patch.dynamic.sample==nil)
+pass('real progression-only session writes initial-tier curves at requested multipliers, preserves zeros and does not stack')
+assert(patch.configure{dynamic_spawn=false})
+assert(patch.apply(api,game))
+for _,off in ipairs(blocks) do
+    local scale=off==0x1a0 and 2 or off==0x3f8 and 1.5 or 1
+    for i=0,4 do assert(approx(get_f32(cfg+off+i*4),(i==3 and 0 or (1.3+i*0.1)*scale))) end
+end
+pass('switching compensation off restores original progression and requested multipliers')
+-- All-one profiles still restore after turning compensation off.
+director_present=false;assert(patch.apply(api,game));patch.dynamic=nil
+mission(faction_caps(45,2000),100,600);fill_config(20,40,8,14,10,30,-1)
+assert(patch.configure{patrol_count=1,patrol_size=1,encounter_cd_seconds=30,patrol_cd_seconds=30})
+patch.modifier_scale_enabled=false
+put_f32(director+patch.cfg_base_offset+0x1a0+16,1.3)
+assert(patch.configure{dynamic_spawn=true})
+patch.dynamic=create_dynamic().create(api,patch,true)
+assert(patch.apply(api,game));assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),1))
+assert(patch.configure{dynamic_spawn=false})
+assert(patch.apply(api,game));assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),1.3))
+pass('all-one profiles also restore progression after compensation is disabled')
+-- Unified v24 policy: all 65 progression entries are exactly neutral, while
+-- user scales remain on the other existing axes. Both extraction sources are
+-- attenuated from a saved native baseline, including OFF/ON and foreign edits.
+director_present=false;assert(patch.apply(api,game));patch.dynamic=nil
+mission(faction_caps(45,2000),100,600);fill_config(20,40,8,14,10,30,-1)
+cfg=director+patch.cfg_base_offset
+patch.dynamic_curve_policy='unit_all_half_extraction'
+local all_blocks={0x128,0x164,0x1a0,0x1dc,0x218,0x254,0x290,0x2cc,0x308,0x344,0x380,0x3bc,0x3f8}
+for _,off in ipairs(all_blocks) do
+    for i=0,14 do put_f32(cfg+off+i*4,1+i*0.1) end
+    put_f32(cfg+off+12,0)
+    put_f32(cfg+off+36,1.4)
+end
+for i,off in ipairs({0x104,0x110,0x11c}) do
+    put_f32(cfg+off,1);put_f32(cfg+off+4,i==3 and 4 or i==2 and 1.5 or 1.2)
+    put_f32(cfg+off+8,200)
+end
+put_f32(cfg+0xe0,1.7) -- influence curve outside extraction must stay native
+assert(patch.configure{dynamic_spawn=true,patrol_count=2,patrol_size=1.5,
+    encounter_cd_seconds=30,patrol_cd_seconds=2})
+patch.dynamic=create_dynamic().create(api,patch,true)
+local function assert_unit_curves()
+    for _,off in ipairs(all_blocks) do
+        local scale=off==0x1a0 and 2 or off==0x3f8 and 1.5 or off==0x1dc and 6 or 1
+        for i=0,4 do assert(approx(get_f32(cfg+off+i*4),1)) end
+        for i=5,14 do
+            assert(approx(get_f32(cfg+off+i*4),(i==9 and 1.2 or 1+i*0.1)*scale))
+        end
+    end
+    assert(approx(get_f32(cfg+0x108),1.1) and approx(get_f32(cfg+0x114),1.25)
+        and approx(get_f32(cfg+0x120),1.2))
+    for _,off in ipairs({0x104,0x110,0x11c}) do
+        assert(approx(get_f32(cfg+off),1) and approx(get_f32(cfg+off+8),200))
+    end
+    assert(approx(get_f32(cfg+0xe0),1.7))
+end
+assert(patch.apply(api,game));assert_unit_curves()
+stable_writes=writes;assert(patch.apply(api,game));assert(writes==stable_writes)
+assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
+for _,off in ipairs(all_blocks) do
+    local scale=off==0x1a0 and 2 or off==0x3f8 and 1.5 or off==0x1dc and 6 or 1
+    for i=0,4 do assert(approx(get_f32(cfg+off+i*4),(i==3 and 0 or 1+i*0.1)*scale)) end
+    assert(approx(get_f32(cfg+off+36),1.4*scale))
+end
+assert(approx(get_f32(cfg+0x120),4))
+assert(patch.configure{dynamic_spawn=true});assert(patch.apply(api,game));assert_unit_curves()
+-- Reductions/zero disable sentinels in extraction are not bonuses.
+put_f32(cfg+0x104,0.8);put_f32(cfg+0x128+36,0)
+put_f32(cfg+0x120,6)
+assert(patch.apply(api,game))
+assert(approx(get_f32(cfg+0x104),0.8) and get_f32(cfg+0x128+36)==0)
+assert(approx(get_f32(cfg+0x120),1.2))
+stable_writes=writes;assert(patch.apply(api,game));assert(writes==stable_writes)
+assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
+assert(approx(get_f32(cfg+0x104),0.8) and approx(get_f32(cfg+0x120),6))
+pass('all 65 progression values equal 1; extraction bonuses halve once; OFF restores zeros and updated baselines')
+-- Verify both bounds, interpolation-range values, original-distance retention,
+-- restoration and idempotence for the tightened patrol extraction curve.
+assert(patch.configure{dynamic_spawn=true})
+put_f32(cfg+0x11c,0.8);put_f32(cfg+0x120,1.2)
+assert(patch.apply(api,game))
+assert(approx(get_f32(cfg+0x11c),1) and approx(get_f32(cfg+0x120),1.1))
+assert(approx(get_f32(cfg+0x124),200))
+stable_writes=writes;assert(patch.apply(api,game));assert(writes==stable_writes)
+assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
+assert(approx(get_f32(cfg+0x11c),0.8) and approx(get_f32(cfg+0x120),1.2))
+put_f32(cfg+0x11c,1);put_f32(cfg+0x120,6)
+pass('patrol extraction-distance endpoints stay within 1-1.2 without stacking and restore original bounds when OFF')
+-- The same policy must work through the complete private resource clone and
+-- mutate only the active row, with independent baselines for that new address.
+local resource_key=string.char(239,205,171,137,103,69,35,241)
+ffi.copy(handle,resource_key,8);put_u32(handle+8,0xffffffff)
+ffi.copy(resource_root+15*16,resource_key,8);put_u32(resource_root+15*16+8,1)
+ffi.copy(resource_root+0x260+patch.cfg_stride,cfg,patch.cfg_stride)
+for _,off in ipairs(blocks) do
+    local scale=off==0x1a0 and 2 or off==0x3f8 and 1.5 or off==0x1dc and 6 or 1
+    for i=0,14 do
+        local dest=resource_root+0x260+patch.cfg_stride+off+i*4
+        put_f32(dest,get_f32(dest)/scale)
+    end
+end
+put_f32(resource_root+0x260+0x128,1.8) -- inactive row must not be changed
+assert(patch.configure{dynamic_spawn=true});assert(patch.apply(api,game))
+assert(patch.detail:find('cfg=resource:1',1,true))
+local resource_cfg=resource_root_live+0x260+patch.cfg_stride
+for _,off in ipairs(all_blocks) do
+    for i=0,4 do assert(approx(get_f32(resource_cfg+off+i*4),1)) end
+end
+assert(approx(get_f32(resource_cfg+0x120),1.2))
+assert(approx(get_f32(resource_root_live+0x260+0x128),1.8))
+stable_writes=writes;assert(patch.apply(api,game));assert(writes==stable_writes)
+assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
+assert(approx(get_f32(resource_cfg+0x120),6) and get_f32(resource_cfg+0x128+12)==0)
+put_u32(handle+8,123)
+pass('neutral progression and halved extraction work in the private resource clone without editing inactive rows')
+-- Invalid added spans fail closed before either extraction source is changed.
+assert(patch.configure{dynamic_spawn=true})
+put_f32(cfg+0x218,0/0)
+local invalid_ok,invalid_reason=patch.apply(api,game)
+assert(not invalid_ok and invalid_reason=='spawn_compensation_layout_mismatch',invalid_reason)
+assert(approx(get_f32(cfg+0x120),6))
+put_f32(cfg+0x218,1)
+put_f32(cfg+0x104,-1)
+invalid_ok,invalid_reason=patch.apply(api,game)
+assert(not invalid_ok and invalid_reason=='spawn_extraction_layout_mismatch',invalid_reason)
+assert(approx(get_f32(cfg+0x120),6))
+pass('malformed full modifier span and extraction records fail before new compensation writes')
+patch.dynamic_curve_policy=nil
+if arg[6]=='local_test' or arg[6]=='combined' then
+    -- Use the real local sampler/session and existing memory writer together.
+    director_present=false;assert(patch.apply(api,game));patch.dynamic=nil
+    mission(faction_caps(45,2000),100,600);fill_config(20,40,8,14,10,30,-1)
+    put_u32(director+0x680,1)
+    local pop_storage=ffi.new('uint8_t[0x20]')
+    local pop=ffi.cast('uint8_t *',pop_storage)
+    local read,query=api.read,api.query_region
+    api.read=function(address,size)
+        if real.distance(address,game+0x3326d18)==0 then return pointer(pop) end
+        return read(address,size)
+    end
+    api.query_region=function(address)
+        local off=real.distance(address,game)
+        if off>=0 and off<0x4000000 then return game,0x4000000,0x1000,4 end
+        return query(address)
+    end
+    local local_factory=assert(loadfile(source..'/experiments/local_pressure.lua'))()
+    local combined=arg[6]=='combined'
+    patch.dynamic_combined_switch=combined
+    patch.dynamic_curve_policy=combined and 'unit_all_half_extraction' or nil
+    assert(patch.configure{dynamic_spawn=false,patrol_count=4,patrol_size=1.8,
+        encounter_cd_seconds=30,patrol_cd_seconds=2})
+    put_u32(director+0x36c0,10);put_u32(pop+0x1c,86)
+    put_f32(director+patch.cfg_base_offset+0x1a0+16,1.5)
+    patch.dynamic=local_factory().create(api,patch,true);patch.dynamic_dt=1
+    assert(patch.apply(api,game))
+    assert(patch.dynamic.progress_enabled==not combined and patch.dynamic.sample.h==96)
+    assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),combined and 6 or 4))
+    assert(patch.configure{dynamic_spawn=true})
+    if combined then
+        for _=1,5 do assert(patch.apply(api,game));assert(patch.dynamic.effective.remaining==0) end
+        put_u32(pop+0x1c,91) -- H=101, never admit H=96 as a trigger
+        for _=1,2 do assert(patch.apply(api,game));assert(patch.dynamic.effective.remaining==0) end
+        put_u32(pop+0x1c,90) -- H=100 must break the consecutive sequence
+        assert(patch.apply(api,game));assert(patch.dynamic.effective.remaining==0)
+        put_u32(pop+0x1c,91)
+    end
+    for _=1,3 do assert(patch.apply(api,game)) end
+    assert(patch.dynamic.effective.phase=='local_h100_hold')
+    for i=0,14 do
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+i*4),combined and i>=5 and 1.3 or 1))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+i*4),combined and i>=5 and 1.08 or 1))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+i*4),combined and (i<5 and 1 or 4.5) or 3))
+    end
+    assert(patch.modifier_patrol_count==4 and patch.modifier_travelers_max_unit==1.8
+        and patch.modifier_patrol_cooldown==6)
+    if combined then
+        assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
+        assert(not patch.dynamic.progress_enabled and patch.dynamic.effective.phase=='off')
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),6))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc),6))
+        assert(patch.configure{dynamic_spawn=true})
+        for _=1,3 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.progress_enabled and patch.dynamic.effective.phase=='local_h100_hold')
+    end
+    if combined then
+        -- An active high sample refreshes the timer rather than expiring it.
+        for _=1,3 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.remaining==20 and patch.dynamic.effective.rate_remaining==10
+            and patch.dynamic.event:find('retrigger:',1,true))
+        put_u32(pop+0x1c,70)
+        for _=1,6 do assert(patch.apply(api,game)) end
+        assert(approx(patch.dynamic.effective.count,2.11) and approx(patch.dynamic.effective.rate,4.5))
+        for _=1,2 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.phase=='local_h100_recover')
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+20),2.38))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+20),1.368))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+20),5.25))
+        assert(patch.modifier_patrol_count==4 and patch.modifier_travelers_max_unit==1.8
+            and patch.modifier_patrol_cooldown==6)
+        for _=1,2 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.remaining==10 and patch.dynamic.effective.rate_remaining==0)
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+20),2.65))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+20),1.44))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+20),6))
+        for _=1,10 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.remaining==0)
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+20),4))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+20),1.8))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+20),6))
+    else for _=1,10 do assert(patch.apply(api,game)) end end
+    assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0),combined and 1 or 4))
+    assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8),combined and 1 or 1.8))
+    assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc),combined and 1 or 6))
+    assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
+    assert(patch.dynamic.progress_enabled==not combined)
+    assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),combined and 6 or 4))
+    api.read,api.query_region=read,query
+    pass(combined and 'combined quantities recover from 10% bonus over 20s while rate keeps its 6s hold/4s recovery through the real writer'
+        or 'real local session writes 1x quantities/half rate then restores after 10s; progression stays active with switch OFF')
+end
 print(count .. ' fast cadence profile checks passed; no executable code was modified.')

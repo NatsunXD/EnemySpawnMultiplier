@@ -38,15 +38,61 @@ def main():
         assert offset == len(png)
         expected_revisions = {
             'data-v23-native', 'data-v23-light-medium', 'data-v23-fast-cadence',
-            'data-v23-preview-patrol-2x-3x', 'data-v23-panel-menus',
+            'data-v23-preview-patrol-2x-3x', 'data-v24-progression-only-panel-menus',
+            'data-v24-local-h100-test',
+            'data-v24-h100-3samples-quantity10pct-20s',
         }
-        panel_like = ('data-v23-panel-menus',)
+        panel_like = ('data-v24-progression-only-panel-menus', 'data-v24-local-h100-test', 'data-v24-h100-3samples-quantity10pct-20s')
         assert provenance['revision'] in expected_revisions
-        assert provenance['display_version'] == 'v23'
-        assert Path(sys.argv[1]).name == provenance['name'].replace(' ', '-') + '-v23.zip'
+        assert provenance['display_version'] == 'v24'
+        suffix=provenance.get('release_suffix')
+        assert suffix==('H100-3Samples-10Pct-20s' if provenance['revision']=='data-v24-h100-3samples-quantity10pct-20s' else None)
+        assert Path(sys.argv[1]).name == provenance['name'].replace(' ', '-') + '-v24' + ('-'+suffix if suffix else '') + '.zip'
         assert provenance['runtime_verified'] is False
         if provenance['revision'] in panel_like:
+            dynamic=provenance['data_change']['dynamic_spawn']
+            combined=provenance['revision']=='data-v24-h100-3samples-quantity10pct-20s'
+            local_test=provenance['revision'] in ('data-v24-local-h100-test','data-v24-h100-3samples-quantity10pct-20s')
+            assert dynamic['default_enabled']
+            if local_test:
+                assert len(manifest['Description'])<150
+                assert dynamic['mode']==('h100_compensation' if combined else 'local_h100_test') and dynamic['sample_seconds']==1
+                assert dynamic['pressure_feedback_enabled'] and not dynamic['s70_control_enabled']
+                assert dynamic['diagnostics']==['S70','H100']
+                assert dynamic['confirmation_samples']==3
+                if combined:
+                    assert dynamic['threshold_gt']==100 and not dynamic['immediate_trigger_enabled']
+                    assert 'immediate_gt' not in dynamic
+                    assert dynamic['hold_seconds']==0 and dynamic['recovery_seconds']==20 and dynamic['duration_seconds']==20
+                    assert dynamic['rate_hold_seconds']==6 and dynamic['rate_recovery_seconds']==4 and dynamic['rate_duration_seconds']==10
+                    assert dynamic['patrol_count_bonus_retained']==0.1 and dynamic['patrol_size_bonus_retained']==0.1
+                    assert dynamic['patrol_rate_factor']==0.75
+                    assert dynamic['retrigger']=='same_threshold_refreshes_quantity_20s_and_rate_10s'
+                    assert dynamic['sub_one_quantities']=='unchanged'
+                    assert dynamic['recovery_interpolation']=='linear_to_latest_applied_user_settings'
+                else:
+                    assert dynamic['threshold_gt']==95 and dynamic['immediate_gt']==100
+                    assert dynamic['hold_seconds']==10
+                    assert dynamic['patrol_count']==1 and dynamic['patrol_size']==1
+                    assert dynamic['patrol_rate_factor']==0.5
+                assert dynamic['switch']==('soft_limit_and_progression_and_extraction' if combined else 'soft_limit_only')
+                assert dynamic['progression']==('all_13_blocks_exact_1' if combined else 'always_initial_tier')
+                if combined:
+                    assert dynamic['progression_floats']==65 and dynamic['progression_zero_policy']=='set_to_1'
+                    assert dynamic['extraction_bonus_factor']==0.5
+                    assert dynamic['extraction_available_offsets']==[hex(0x128+i*60+36) for i in range(13)]
+                    assert dynamic['extraction_distance_blocks']==['0x104','0x110','0x11C']
+                    assert dynamic['extraction_patrol_distance_rate_range']==[1.0,1.2]
+                    assert dynamic['extraction_patrol_distance_endpoint_offsets']==['0x11C','0x120']
+            else:
+                assert dynamic['mode']=='progression_only'
+                assert not dynamic['pressure_feedback_enabled'] and dynamic['sample_seconds'] is None
+                assert dynamic['patrol_multipliers']=='user_requested' and dynamic['progression']=='initial_tier'
+            assert dynamic['background_only'] and not dynamic['pressure_counter_writes']
             budget=provenance['performance_budget']
+            assert budget['pressure_reads_per_second']==(17 if local_test else 0)
+            assert budget['pressure_bytes_per_second']==(104 if local_test else 0)
+            assert budget['pressure_region_queries_per_second_max']==(17 if local_test else 0)
             assert budget['log_queue_bytes']==16384 and budget['log_queue_lines']==32
             assert budget['log_flush_seconds']==5 and budget['blackbox_summary_seconds']==30
             assert budget['clone_retention_bytes']==8388608 and budget['runtime_verified'] is False
@@ -137,9 +183,9 @@ def main():
         assert provenance['loader_integration'] == {
             'minimum_loader_version': 15,
             'api': 1,
-            'discovery_entry': 'mods/cowboybingus/enemy_spawn_multiplier',
-            'implementation_resource': 'mods/cowboybingus/enemy_spawn_multiplier_impl',
-            'legacy_registry_compatible': True,
+            'discovery_entry': 'mods/natsun/enemy_spawn_multiplier',
+            'implementation_resource': 'mods/natsun/enemy_spawn_multiplier_impl',
+            'legacy_registry_compatible': False,
         }
         for name, digest in provenance['files'].items():
             assert hashlib.sha256(payloads[name]).hexdigest().upper() == digest
@@ -147,7 +193,7 @@ def main():
         assert struct.unpack_from('<III', main_archive) == (0xF0000011, 1, 2)
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
         from archive import resource_hash
-        entry_name = 'mods/cowboybingus/enemy_spawn_multiplier'
+        entry_name = 'mods/natsun/enemy_spawn_multiplier'
         implementation_name = entry_name + '_impl'
         entries = [struct.unpack_from('<7Q6I', main_archive, 104 + index * 80) for index in range(2)]
         assert {entry[0] for entry in entries} == {resource_hash(entry_name), resource_hash(implementation_name)}

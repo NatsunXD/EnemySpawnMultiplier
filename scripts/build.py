@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'src'
 TESTS = ROOT / 'tests'
 BUILD = ROOT / 'build'
-RESOURCE = 'mods/cowboybingus/enemy_spawn_multiplier'
+RESOURCE = 'mods/natsun/enemy_spawn_multiplier'
 IMPLEMENTATION_RESOURCE = RESOURCE + '_impl'
-VERSION = 23
+VERSION = 24
 PUBLIC_VERSION = f'v{VERSION}'
 VARIANTS = {
     'base': {
@@ -145,10 +145,14 @@ VARIANTS = {
 
 VARIANTS['panel-menus'] = dict(
     VARIANTS['panel'],
-    revision='data-v23-panel-menus', public_version=PUBLIC_VERSION, version=VERSION,
-    name='Enemy Spawn Multiplier Panel',
+    revision='data-v24-progression-only-panel-menus', public_version=PUBLIC_VERSION, version=VERSION,
+    name='Enemy Spawn Multiplier Panel Progression Only',
     description=(
-        'Panel build with privacy + SOS lobby gates. Skips spawn writes (and fast corpse decay) while '
+        'Progression-only test build with default-on Dynamic spawn compensation at the initial tier. '
+        'Population-pressure feedback and its sampling are disabled; patrol quantity and rate '
+        'multipliers follow the user settings without pressure-triggered reductions. '
+        'F8 uses a tactical black/yellow console with grouped controls and composition cards. '
+        'Automatic values remain in the background. Includes privacy + SOS lobby gates. Skips spawn writes (and fast corpse decay) while '
         'matchmaking privacy is Public, or after the host spends the SOS beacon (read-only stratagem-slot '
         'probe; latched for the rest of that mission). Unknown game.dll PE layouts fail closed until offsets '
         'are updated; probe init/runtime errors keep spawn writes available and retry. SOS scan interval is '
@@ -157,9 +161,22 @@ VARIANTS['panel-menus'] = dict(
         'translated native settings. Requires the official Bingus Shared Loader v15 or newer.'),
 )
 
-# Preserve existing CLI entry points; each builds the current v23 panel.
+# Preserve the progression-only test profiles under their existing CLI names.
 for alias in ('panel', 'panel-local', 'panel-performance'):
     VARIANTS[alias] = dict(VARIANTS['panel-menus'])
+
+# Explicit opt-in only: normal build aliases never select this module.
+VARIANTS['local-soft-limit-test'] = dict(
+    VARIANTS['panel-menus'], revision='data-v24-local-h100-test',
+    name='Enemy Spawn Multiplier Local Test', local_pressure_test=True,
+    description='Local test by Natsun. F8 settings; optional H100 soft limit. Requires Bingus Shared Loader v15+.',
+)
+VARIANTS['dynamic-compensation'] = dict(
+    VARIANTS['local-soft-limit-test'], revision='data-v24-h100-3samples-quantity10pct-20s',
+    name='Enemy Spawn Multiplier', combined_compensation=True,
+    release_suffix='H100-3Samples-10Pct-20s',
+    description='By Natsun. F8 settings with dynamic spawn compensation. Requires Bingus Shared Loader v15+.',
+)
 
 
 def run(args, **kwargs):
@@ -187,11 +204,11 @@ def inspect_archive(data):
 
 def main():
     if len(sys.argv) == 1:
-        key = 'panel-menus'
+        key = 'dynamic-compensation'
     else:
         key = sys.argv[1]
-    if key not in ('panel', 'panel-local', 'panel-menus', 'panel-performance'):
-        raise SystemExit('Use: build.py panel-menus, panel, panel-local, or panel-performance')
+    if key not in ('panel', 'panel-local', 'panel-menus', 'panel-performance', 'local-soft-limit-test', 'dynamic-compensation'):
+        raise SystemExit('Use: build.py panel-menus, panel, panel-local, panel-performance, local-soft-limit-test, or dynamic-compensation')
     variant = VARIANTS[key]
     revision = variant['revision']
     settings = {
@@ -231,13 +248,20 @@ def main():
     resources = build_module(ROOT, build, RESOURCE, 'spawn_patch.lua', revision,
                              template_bias=variant['template_bias'],
                              overrides=variant.get('overrides'),
-                             with_panel=variant.get('panel', False))
+                             with_panel=variant.get('panel', False),
+                             local_pressure_test=variant.get('local_pressure_test', False),
+                             combined_compensation=variant.get('combined_compensation', False))
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')
     tests = run([LUA, TESTS / 'test_data.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
-    if key in ('fast-cadence', 'preview-patrol-2x-3x', 'panel', 'panel-local', 'panel-menus', 'panel-performance'):
+    if key in ('fast-cadence', 'preview-patrol-2x-3x', 'panel', 'panel-local', 'panel-menus', 'panel-performance', 'local-soft-limit-test', 'dynamic-compensation'):
         tests += '\n' + run([LUA, TESTS / 'test_fast_cadence.lua', SOURCE, build, sha(LUA.read_bytes()),
-                             settings['modifier_patrol_count'], settings['modifier_travelers_max_unit']], env=env)
+                             settings['modifier_patrol_count'], settings['modifier_travelers_max_unit'],
+                             'combined' if variant.get('combined_compensation') else
+                             'local_test' if variant.get('local_pressure_test') else 'normal'], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_panel_model.lua', SOURCE, build], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_dynamic_spawn.lua', SOURCE], env=env)
+    if variant.get('local_pressure_test'):
+        tests += '\n' + run([LUA, TESTS / 'test_local_pressure.lua', SOURCE, build], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_blackbox.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_performance_budget.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_sos_probe.lua', SOURCE], env=env)
@@ -333,6 +357,11 @@ def main():
             'traveler_cooldown_min': settings['traveler_cooldown_min'],
             'traveler_cooldown_max': settings['traveler_cooldown_max'],
             'modifier_scale_enabled': settings['modifier_scale_enabled'],
+            'dynamic_spawn': {'default_enabled': True, 'mode': 'progression_only',
+                              'pressure_feedback_enabled': False, 'sample_seconds': None,
+                              'patrol_multipliers': 'user_requested',
+                              'progression': 'initial_tier', 'background_only': True,
+                              'pressure_counter_writes': False, 'runtime_verified': False},
             'modifier_blocks': {'encounter_cooldown_rate': '0x164', 'patrol_count_max': '0x1A0',
                                 'patrol_spawn_cooldown_rate': '0x1DC', 'block_floats': 15,
                                 'evaluator_rva': '0xFE5280'},
@@ -370,7 +399,7 @@ def main():
         'loader_integration': {
             'minimum_loader_version': 15, 'api': 1,
             'discovery_entry': RESOURCE, 'implementation_resource': IMPLEMENTATION_RESOURCE,
-            'legacy_registry_compatible': True,
+            'legacy_registry_compatible': False,
         },
         'offline_tests': tests.strip().splitlines(),
     }
@@ -397,8 +426,52 @@ def main():
         'scan_reads_per_pass': 16, 'dynamic_chunk_bytes': 262144,
         'signature_matches_per_pass': 256, 'dynamic_records_per_kind': 4096,
         'clone_retention_bytes': 8388608, 'resource_clone_attempts_per_owner_root': 3,
+        'pressure_reads_per_second': 0, 'pressure_bytes_per_second': 0,
+        'pressure_region_queries_per_second_max': 0,
         'runtime_verified': False,
     }
+    if variant.get('local_pressure_test'):
+        report['data_change']['dynamic_spawn'] = {
+            'default_enabled': True, 'mode': 'local_h100_test',
+            'pressure_feedback_enabled': True, 'sample_seconds': 1,
+            'threshold_gt': 95, 'confirmation_samples': 3, 'immediate_gt': 100,
+            'hold_seconds': 10, 'retrigger': 'fresh_confirmation_after_restore',
+            'patrol_count': 1, 'patrol_size': 1, 'patrol_rate_factor': 0.5,
+            's70_control_enabled': False, 'diagnostics': ['S70', 'H100'],
+            'rejection_observation': 'gate_condition_only',
+            'progression': 'always_initial_tier', 'switch': 'soft_limit_only',
+            'background_only': True, 'pressure_counter_writes': False,
+            'runtime_verified': False,
+        }
+        report['performance_budget'].update(pressure_reads_per_second=17,
+            pressure_bytes_per_second=104, pressure_region_queries_per_second_max=17)
+        report['source_sha256'].update({path.relative_to(ROOT).as_posix(): sha(path.read_bytes())
+            for path in (SOURCE / 'experiments').glob('*.lua')})
+        if variant.get('combined_compensation'):
+            report['data_change']['dynamic_spawn'].update(mode='h100_compensation',
+                threshold_gt=100, confirmation_samples=3, immediate_trigger_enabled=False,
+                hold_seconds=0, recovery_seconds=20, duration_seconds=20,
+                rate_hold_seconds=6, rate_recovery_seconds=4, rate_duration_seconds=10,
+                retrigger='same_threshold_refreshes_quantity_20s_and_rate_10s',
+                patrol_count_bonus_retained=0.1, patrol_size_bonus_retained=0.1,
+                patrol_rate_factor=0.75, sub_one_quantities='unchanged',
+                recovery_interpolation='linear_to_latest_applied_user_settings',
+                progression='all_13_blocks_exact_1', switch='soft_limit_and_progression_and_extraction',
+                progression_floats=65, progression_zero_policy='set_to_1',
+                extraction_bonus_factor=0.5, extraction_bonus_rule='v>1 ? 1+(v-1)*0.5 : v',
+                extraction_available_offsets=[hex(0x128+60*i+36) for i in range(13)],
+                extraction_distance_blocks=['0x104','0x110','0x11C'],
+                extraction_patrol_distance_rate_range=[1.0,1.2],
+                extraction_patrol_distance_endpoint_offsets=['0x11C','0x120'])
+            del report['data_change']['dynamic_spawn']['patrol_count']
+            del report['data_change']['dynamic_spawn']['patrol_size']
+            del report['data_change']['dynamic_spawn']['immediate_gt']
+            report['performance_budget'].update(
+                full_curve_validation_bytes_per_pass=780, extraction_snapshot_bytes_per_pass=36,
+                all_curves_noop_read_limit_per_pass=145,
+                all_curves_noop_fixture='hash lookup, 64 candidates, no pressure sampler')
+    if variant.get('release_suffix'):
+        report['release_suffix']=variant['release_suffix']
     release = package_release(ROOT, build, report)
     package_tests = run([sys.executable, TESTS / 'test_package.py', release])
     (build / 'package-tests.txt').write_text(package_tests, encoding='utf-8')

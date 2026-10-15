@@ -36,6 +36,7 @@ local patch = {
     modifier_patrol_cooldown = 0,      -- cfg+0x1DC patrol_spawn_cooldown_rate_modifier
     modifier_travelers_max_unit = 0,   -- cfg+0x3F8 travelers_max_unit_count_multiplier
     modifier_state_key = 'none',
+    dynamic_spawn_enabled = true,
     guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
@@ -213,6 +214,9 @@ function patch.configure(settings)
     if next_fast_corpse ~= nil and type(next_fast_corpse) ~= 'boolean' then
         return false, 'fast_corpse_not_boolean'
     end
+    if settings.dynamic_spawn ~= nil and type(settings.dynamic_spawn) ~= 'boolean' then
+        return false, 'dynamic_spawn_not_boolean'
+    end
 
     if next_budget then
         patch.budget_multiplier = next_budget
@@ -224,6 +228,7 @@ function patch.configure(settings)
     end
     if next_patrol_count then patch.modifier_patrol_count = next_patrol_count end
     if next_patrol_size then patch.modifier_travelers_max_unit = next_patrol_size end
+    if settings.dynamic_spawn ~= nil then patch.dynamic_spawn_enabled=settings.dynamic_spawn end
     if next_encounter_cd then
         local rate, clamp, seconds = cooldown_profile(next_encounter_cd, patch.cooldown_fast_rate)
         if not rate then return false, 'encounter_cd_profile_mismatch' end
@@ -335,6 +340,7 @@ local function finite(value)
     return value == value and math.abs(value) ~= math.huge
 end
 local function reset()
+    if patch.dynamic then patch.dynamic.reset() end
     originals = {}
     mission.director, mission.key = nil, nil
     mission.points_original, mission.points_applied = nil, nil
@@ -722,12 +728,33 @@ local MODIFIER_BLOCKS = {
     {offset = 0x1dc, key = 'patrol_cooldown', label = 'spawn_modifier_patrol_cooldown'},
     {offset = 0x3f8, key = 'travelers_max_unit', label = 'spawn_modifier_travelers_max_unit'},
 }
+-- All 13 MissionDifficultyModifierSettings blocks in the pinned 0x43C row.
+-- The unified v24 build explicitly selects this policy; older experiments
+-- retain their initial-tier compensation and four-block tuning behavior.
+local ALL_MODIFIER_BLOCKS = {
+    {offset=0x128,label='encounter_points'},
+    MODIFIER_BLOCKS[1], MODIFIER_BLOCKS[2], MODIFIER_BLOCKS[3],
+    {offset=0x218,label='spawner_queue_limit'},
+    {offset=0x254,label='spawner_production_cooldown'},
+    {offset=0x290,label='spawner_spawn_count'},
+    {offset=0x2cc,label='spawner_spawn_count_minimum'},
+    {offset=0x308,label='spawner_spawn_cooldown'},
+    {offset=0x344,label='guard_force_member_count'},
+    {offset=0x380,label='global_spawner_cooldown'},
+    {offset=0x3bc,label='travelers_waves_cooldown'},
+    MODIFIER_BLOCKS[4],
+}
+local function half_extraction_bonus(value)
+    -- Neutral multipliers and native reductions are not extra bonuses.
+    return value>1 and 1+(value-1)*0.5 or value
+end
 local function modifier_scales()
+    local effective=patch.dynamic and patch.dynamic.effective
     return {
         encounter_cooldown = patch.modifier_encounter_cooldown,
-        patrol_count = patch.modifier_patrol_count,
-        patrol_cooldown = patch.modifier_patrol_cooldown,
-        travelers_max_unit = patch.modifier_travelers_max_unit,
+        patrol_count = effective and effective.count or patch.modifier_patrol_count,
+        patrol_cooldown = effective and effective.rate or patch.modifier_patrol_cooldown,
+        travelers_max_unit = effective and effective.size or patch.modifier_travelers_max_unit,
     }
 end
 local function scale_modifier_block(api, address, offset, scale, label)
@@ -749,16 +776,28 @@ local function scale_modifier_block(api, address, offset, scale, label)
         if not finite(current[index]) then return nil, label .. '_layout_mismatch' end
     end
     if not saved then
-        saved = {baseline = {}}
+        saved = {baseline = {},applied = {},entry_progress=current[0]}
         for index = 0, MODIFIER_BLOCK_SIZE - 1 do saved.baseline[index] = current[index] end
         store[offset] = saved
+    end
+    local unit_policy=patch.dynamic_curve_policy=='unit_all_half_extraction'
+    local progress=patch.dynamic and patch.dynamic.progress_enabled
+    local function target_value(base,index)
+        if unit_policy and progress then
+            if index<5 then return 1.0 end -- exact neutral progression, even at zero
+            if index==9 then return half_extraction_bonus(base)*scale end
+        elseif progress and index<5 and saved.entry_progress>0 then
+            return saved.entry_progress*scale
+        end
+        return base*scale
     end
     local changed = 0
     for index = 0, MODIFIER_BLOCK_SIZE - 1 do
         local base = saved.baseline[index]
-        if base ~= 0 then
+        if base ~= 0 or (unit_policy and progress and index<5)
+            or (saved.applied[index]~=nil and saved.applied[index]~=base) then
             local live = current[index]
-            local target = base * scale
+            local target = target_value(base,index)
             if not near(live, target) then
                 -- Three cases reach this point. `live` equal to the stored
                 -- baseline means the game never took our value; `live` equal to
@@ -767,10 +806,10 @@ local function scale_modifier_block(api, address, offset, scale, label)
                 -- authoritative, so a scale change (including a live panel
                 -- change) just recomputes the target. Anything else is the game
                 -- re-blending a new native row, which becomes the new baseline.
-                local ours = saved.applied_scale and (base * saved.applied_scale) or base
+                local ours = saved.applied[index] or base
                 if not (near(live, base) or near(live, ours)) then
                     saved.baseline[index] = live
-                    target = live * scale
+                    target = target_value(live,index)
                 end
                 if not api.write(address + offset + index * 4, pack_f32(target))
                     or not near(number(api.read(address + offset + index * 4, 4) or '', 0), target) then
@@ -779,10 +818,56 @@ local function scale_modifier_block(api, address, offset, scale, label)
                 current[index] = target
                 changed = changed + 1
             end
+            saved.applied[index]=target
         end
     end
     saved.applied_scale = scale
     return changed, current[0]
+end
+local function compensate_extraction_distance(api,address)
+    -- Three {min,max,falloff_distance} records at 0x104/0x110/0x11C.
+    -- Keep distances unchanged and retain a baseline/applied ledger for OFF.
+    local offset,size=0x104,36
+    local bytes=api.read(address+offset,size)
+    if not bytes or #bytes~=size then return nil,'spawn_extraction_unreadable' end
+    local current={}
+    for index=0,8 do
+        local v=number(bytes,index*4)
+        if not finite(v) or v<0 or v>(index%3==2 and 1000000 or 50) then
+            return nil,'spawn_extraction_layout_mismatch'
+        end
+        current[index]=v
+    end
+    local store=modifier_state[tostring(address)]
+    if not store then store={};modifier_state[tostring(address)]=store end
+    local saved=store[offset]
+    if not saved then
+        saved={baseline={},applied={}};store[offset]=saved
+        for index=0,8 do saved.baseline[index]=current[index] end
+    end
+    local enabled=patch.dynamic and patch.dynamic.progress_enabled
+    for index=0,8 do
+        if index%3~=2 then
+            local base,live=saved.baseline[index],current[index]
+            if not near(live,base) and not near(live,saved.applied[index] or base) then
+                saved.baseline[index]=live;base=live
+            end
+            local target=enabled and half_extraction_bonus(base) or base
+            -- Patrol extraction-distance endpoints only; availability and the
+            -- other two distance curves keep their existing bonus policy.
+            if enabled and (index==6 or index==7) then
+                target=math.min(1.2,math.max(1.0,target))
+            end
+            if not near(live,target) then
+                if not api.write(address+offset+index*4,pack_f32(target))
+                    or not near(number(api.read(address+offset+index*4,4) or '',0),target) then
+                    return nil,'spawn_extraction_write_failed'
+                end
+            end
+            saved.applied[index]=target
+        end
+    end
+    return true
 end
 local function copy_cfg(cfg)
     return {
@@ -1057,13 +1142,37 @@ local function scale_config(api, game, director)
         tvc_min, tvc_max = target_min, target_max
     end
     patch.modifier_detail = ''
-    if patch.modifier_scale_enabled then
+    if patch.modifier_scale_enabled or (patch.dynamic and patch.dynamic.progress_enabled) then
+        -- Keep visiting the ledger after disabling compensation so applied
+        -- progress curves are restored even when all user scales equal one.
+        patch.modifier_scale_enabled = true
         local scales = modifier_scales()
         local parts = {}
-        for _, block in ipairs(MODIFIER_BLOCKS) do
-            local applied, head = scale_modifier_block(api, address, block.offset, scales[block.key], block.label)
+        local unit_policy=patch.dynamic_curve_policy=='unit_all_half_extraction'
+        local blocks=unit_policy and ALL_MODIFIER_BLOCKS or MODIFIER_BLOCKS
+        if unit_policy then
+            -- Re-resolve owner identity and validate the complete additional span
+            -- before touching it; no guessed offsets or partial curve layouts.
+            local resolved=resolve_config(api,game,director)
+            if not resolved or not same_pointer(api,resolved,address) then
+                return nil,'spawn_compensation_config_changed'
+            end
+            local bytes=api.read(address+0x128,13*60)
+            if not bytes or #bytes~=13*60 then return nil,'spawn_compensation_unreadable' end
+            for index=0,13*15-1 do
+                local value=number(bytes,index*4)
+                if not finite(value) or value<0 or value>50 then
+                    return nil,'spawn_compensation_layout_mismatch'
+                end
+            end
+            local ok,reason=compensate_extraction_distance(api,address)
+            if not ok then return nil,reason end
+        end
+        for _, block in ipairs(blocks) do
+            local applied, head = scale_modifier_block(api, address, block.offset,
+                scales[block.key] or 1, block.label)
             if applied == nil then return nil, head end
-            parts[#parts + 1] = string.format('%.2f', head)
+            if block.key then parts[#parts + 1] = string.format('%.2f', head) end
         end
         patch.modifier_detail = ' mv=' .. table.concat(parts, '/')
             .. ' ms=' .. string.format('%.1f/%.1f/%.1f/%.1f',
@@ -1158,6 +1267,7 @@ function patch.apply(api, game)
         end
     end
     if not same_pointer(api, mission.director, director) or mission.key ~= key then
+        if patch.dynamic then patch.dynamic.reset() end
         originals = {}
         mission.director, mission.key = director, key
         mission.points_original, mission.points_applied = nil, nil
@@ -1194,6 +1304,12 @@ function patch.apply(api, game)
         describe(points, mission.points_original, valid, count, 0, 0, nil,
             guardforce, mission.guardforce_original, unstable_faction)
         return true, 'waiting_for_stable_mission', false
+    end
+
+    if patch.dynamic then
+        patch.dynamic.update(game,director,patch.dynamic_dt or 0)
+        patch.diag.dynamic_effective=patch.dynamic.effective
+        patch.diag.dynamic_sample=patch.dynamic.sample
     end
 
     if #pending > 0 then

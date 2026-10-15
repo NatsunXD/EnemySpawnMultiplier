@@ -25,7 +25,7 @@ return function(create_model, patch, options)
             return math.abs(steps - math.floor(steps + 0.5)) < 1e-6
         end
         if key == 'preset' then return value == 'heavy' or value == 'light_medium' or value == 'native' end
-        if key == 'fast_corpse' then return type(value) == 'boolean' end
+        if key == 'fast_corpse' or key == 'dynamic_spawn' then return type(value) == 'boolean' end
         if key == 'language' then return value == 'zh' or value == 'en' end
         return false
     end

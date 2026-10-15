@@ -1,6 +1,9 @@
 /artifacts/
 /build/
 /releases/
+/release/
+/docs/
+/research/
 /tools/
 /vendor/
 /.cache/

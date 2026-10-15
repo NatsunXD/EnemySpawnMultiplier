@@ -200,4 +200,57 @@ assert(scans==1 and writes==0 and decay_updates==0 and session.sticky)
 live=false; latched.update(0.1)
 assert(not session.sticky and writes==1 and decay_updates==1)
 pass('SOS latch blocks both writers until return to ship')
+-- Appended controller factory receives exact-build identity and elapsed time.
+local create_dynamic=assert(loadfile(source..'/dynamic_spawn.lua'))()
+local attached,known,elapsed_dt,resets,pressure_flag
+local instrumented={detail='',modifier_patrol_count=3,
+    modifier_travelers_max_unit=2,modifier_patrol_cooldown=6,
+    in_mission=function() return live end}
+instrumented.apply=function() elapsed_dt=instrumented.dynamic_dt;return true,'active',live end
+local isolated=setmetatable({print=function() end,os={getenv=function() return nil end},
+    update=function() return 'forwarded' end},{__index=_G});isolated._G=isolated
+local loader_chunk=assert(loadfile(source..'/archive_loader.lua'));setfenv(loader_chunk,isolated)
+loader_chunk()(factory,instrumented,identity,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil,function()
+    local module=create_dynamic()
+    local original=module.create
+    module.create=function(api,p,build_known,pressure_enabled)
+        pressure_flag=pressure_enabled
+        known=build_known;attached=original(api,p,build_known,pressure_enabled)
+        local reset=attached.reset
+        attached.reset=function() resets=(resets or 0)+1;reset() end
+        return attached
+    end
+    return module
+end)
+assert(attached==instrumented.dynamic and known==true and pressure_flag==false)
+live=true;assert(isolated.update(0.4)=='forwarded');assert(elapsed_dt==0.4)
+live=false;isolated.update(0.1);assert(resets and resets>0)
+pass('real loader disables pressure feedback, attaches exact-build controller, forwards elapsed time and resets on ship')
+-- The local variant's sparse events and cumulative diagnostic statistics must
+-- reach the actual log file, rather than existing only on the sampler object.
+local experiment_factory=assert(loadfile(source..'/experiments/local_pressure.lua'))()
+local experiment_patch={detail='',modifier_patrol_count=4,
+    modifier_travelers_max_unit=1.8,modifier_patrol_cooldown=6,
+    in_mission=function() return true end,
+    apply=function() return true,'active',true end}
+local log_env=setmetatable({print=function() end,os={getenv=function(key)
+    if key=='LOCALAPPDATA' then return temp end
+end},update=function() return true end},{__index=_G});log_env._G=log_env
+local real_chunk=assert(loadfile(source..'/archive_loader.lua'));setfenv(real_chunk,log_env)
+real_chunk()(factory,experiment_patch,identity,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil,experiment_factory)
+local controller=assert(experiment_patch.dynamic)
+assert(controller.mode=='local_h100_test')
+controller.effective={count=1,size=1,rate=3,phase='local_h100_hold'}
+controller.sample={s70=72,h=101,q=10,b=91,p=20,e=9}
+controller.stats={valid=12,invalid=1,s70_ge70=4,h_gt95=3,h_gt100=1,peak_s70=75,peak_h=101}
+controller.event='trigger: H=101 above native gate'
+controller.observation_event='S70=72 H=101 gate_condition_only'
+for _=1,31 do log_env.update(1) end
+log_env.EnemySpawnMultiplier.flush_log()
+local logged=assert(io.open(log_path,'r'));local body=logged:read('*a');logged:close()
+assert(body:find('local_soft_limit',1,true) and body:find('local_gate_crossing',1,true))
+assert(body:find('local_gate_stats',1,true) and body:find('S70_ge70=4 H_gt95=3 H_gt100=1',1,true))
+assert(body:find('peak_S70=75 peak_H=101',1,true))
+assert(controller.event==nil and controller.observation_event==nil)
+pass('local trigger/crossing events and both gate hit-counts/peaks reach the real bounded log writer')
 print(count .. ' panel loader-integration checks passed; no game process involved.')
