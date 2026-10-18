@@ -41,41 +41,135 @@ def main():
             'data-v23-preview-patrol-2x-3x', 'data-v24-progression-only-panel-menus',
             'data-v24-local-h100-test',
             'data-v24-h100-3samples-quantity10pct-20s',
+            'data-v24-spawn-guard-s70-h130',
+            'data-v24-spawn-guard-s70-h150',
+            'data-v24-spawn-guard-s70-h170',
+            'data-v24-spawn-guard-s70-h200',
+            'data-v24-spawn-guard-s70-float',
+            'data-v24-spawn-guard-privacy-solo',
         }
-        panel_like = ('data-v24-progression-only-panel-menus', 'data-v24-local-h100-test', 'data-v24-h100-3samples-quantity10pct-20s')
+        panel_like = ('data-v24-progression-only-panel-menus', 'data-v24-local-h100-test',
+                      'data-v24-h100-3samples-quantity10pct-20s', 'data-v24-spawn-guard-s70-h130',
+                      'data-v24-spawn-guard-s70-h150', 'data-v24-spawn-guard-s70-h170',
+                      'data-v24-spawn-guard-s70-h200', 'data-v24-spawn-guard-s70-float',
+                      'data-v24-spawn-guard-privacy-solo')
         assert provenance['revision'] in expected_revisions
         assert provenance['display_version'] == 'v24'
         suffix=provenance.get('release_suffix')
-        assert suffix==('H100-3Samples-10Pct-20s' if provenance['revision']=='data-v24-h100-3samples-quantity10pct-20s' else None)
+        expected_suffix = {
+            'data-v24-h100-3samples-quantity10pct-20s': 'H100-3Samples-10Pct-20s',
+            'data-v24-spawn-guard-s70-h130': 'SpawnGuard-S70-H130',
+            'data-v24-spawn-guard-s70-h150': 'SpawnGuard-S70-H150',
+            'data-v24-spawn-guard-s70-h170': 'SpawnGuard-S70-H170',
+            'data-v24-spawn-guard-s70-h200': 'SpawnGuard-S70-H200',
+            'data-v24-spawn-guard-s70-float': 'SpawnGuard-S70-Float',
+            'data-v24-spawn-guard-privacy-solo': 'SpawnGuard-PrivacySolo',
+        }.get(provenance['revision'])
+        assert suffix == expected_suffix
         assert Path(sys.argv[1]).name == provenance['name'].replace(' ', '-') + '-v24' + ('-'+suffix if suffix else '') + '.zip'
         assert provenance['runtime_verified'] is False
         if provenance['revision'] in panel_like:
             dynamic=provenance['data_change']['dynamic_spawn']
-            combined=provenance['revision']=='data-v24-h100-3samples-quantity10pct-20s'
-            local_test=provenance['revision'] in ('data-v24-local-h100-test','data-v24-h100-3samples-quantity10pct-20s')
+            spawn_guard=provenance['revision'] in ('data-v24-spawn-guard-s70-h130',
+                                                    'data-v24-spawn-guard-s70-h150',
+                                                    'data-v24-spawn-guard-s70-h170',
+                                                    'data-v24-spawn-guard-s70-h200',
+                                                    'data-v24-spawn-guard-s70-float',
+                                                    'data-v24-spawn-guard-privacy-solo')
+            spawn_guard_h150=provenance['revision']=='data-v24-spawn-guard-s70-h150'
+            spawn_guard_h170=provenance['revision']=='data-v24-spawn-guard-s70-h170'
+            spawn_guard_h200=provenance['revision']=='data-v24-spawn-guard-s70-h200'
+            spawn_guard_float=provenance['revision'] in ('data-v24-spawn-guard-s70-float',
+                                                         'data-v24-spawn-guard-privacy-solo')
+            combined=provenance['revision'] in ('data-v24-h100-3samples-quantity10pct-20s',
+                                                 'data-v24-spawn-guard-s70-h130',
+                                                 'data-v24-spawn-guard-s70-h150',
+                                                 'data-v24-spawn-guard-s70-h170',
+                                                 'data-v24-spawn-guard-s70-h200',
+                                                 'data-v24-spawn-guard-s70-float',
+                                                 'data-v24-spawn-guard-privacy-solo')
+            local_test=provenance['revision'] in ('data-v24-local-h100-test',
+                                                   'data-v24-h100-3samples-quantity10pct-20s',
+                                                   'data-v24-spawn-guard-s70-h130',
+                                                   'data-v24-spawn-guard-s70-h150',
+                                                   'data-v24-spawn-guard-s70-h170',
+                                                   'data-v24-spawn-guard-s70-h200',
+                                                   'data-v24-spawn-guard-s70-float',
+                                                   'data-v24-spawn-guard-privacy-solo')
             assert dynamic['default_enabled']
             if local_test:
                 assert len(manifest['Description'])<150
-                assert dynamic['mode']==('h100_compensation' if combined else 'local_h100_test') and dynamic['sample_seconds']==1
-                assert dynamic['pressure_feedback_enabled'] and not dynamic['s70_control_enabled']
+                expected_mode = 'spawn_guard' if spawn_guard else ('h100_compensation' if combined else 'local_h100_test')
+                assert dynamic['mode']==expected_mode and dynamic['sample_seconds']==1
+                assert dynamic['pressure_feedback_enabled']
+                assert dynamic['s70_control_enabled'] is spawn_guard
                 assert dynamic['diagnostics']==['S70','H100']
                 assert dynamic['confirmation_samples']==3
                 if combined:
-                    assert dynamic['threshold_gt']==100 and not dynamic['immediate_trigger_enabled']
+                    if spawn_guard_float: h_trig = 200
+                    elif spawn_guard_h200: h_trig = 200
+                    elif spawn_guard_h170: h_trig = 170
+                    elif spawn_guard_h150: h_trig = 150
+                    elif spawn_guard: h_trig = 130
+                    else: h_trig = 100
+                    assert dynamic['threshold_gt']==h_trig and not dynamic['immediate_trigger_enabled']
                     assert 'immediate_gt' not in dynamic
                     assert dynamic['hold_seconds']==0 and dynamic['recovery_seconds']==20 and dynamic['duration_seconds']==20
                     assert dynamic['rate_hold_seconds']==6 and dynamic['rate_recovery_seconds']==4 and dynamic['rate_duration_seconds']==10
-                    assert dynamic['patrol_count_bonus_retained']==0.1 and dynamic['patrol_size_bonus_retained']==0.1
-                    assert dynamic['patrol_rate_factor']==0.75
+                    if spawn_guard_float: keep = 0.80
+                    elif spawn_guard_h200: keep = 0.75
+                    elif spawn_guard_h170: keep = 0.55
+                    elif spawn_guard_h150: keep = 0.40
+                    elif spawn_guard: keep = 0.25
+                    else: keep = 0.1
+                    assert dynamic['patrol_count_bonus_retained']==keep and dynamic['patrol_size_bonus_retained']==keep
+                    if spawn_guard_float: rate_f = 0.92
+                    elif spawn_guard_h200: rate_f = 0.95
+                    elif spawn_guard_h170: rate_f = 0.90
+                    elif spawn_guard_h150: rate_f = 0.85
+                    elif spawn_guard: rate_f = 0.80
+                    else: rate_f = 0.75
+                    assert dynamic['patrol_rate_factor']==rate_f
                     assert dynamic['retrigger']=='same_threshold_refreshes_quantity_20s_and_rate_10s'
                     assert dynamic['sub_one_quantities']=='unchanged'
                     assert dynamic['recovery_interpolation']=='linear_to_latest_applied_user_settings'
+                    if spawn_guard:
+                        if spawn_guard_float:
+                            soft, soft_rate, spacing, release, confirm, hard = 64, 0.82, 0.5, 68, 2, 78
+                        elif spawn_guard_h200:
+                            soft, soft_rate, spacing, release, confirm, hard = 62, 1.0, 0.75, 58, 3, 65
+                        elif spawn_guard_h170:
+                            soft, soft_rate, spacing, release, confirm, hard = 58, 0.95, 1, 50, 2, 65
+                        elif spawn_guard_h150:
+                            soft, soft_rate, spacing, release, confirm, hard = 55, 0.90, 1, 50, 2, 65
+                        else:
+                            soft, soft_rate, spacing, release, confirm, hard = 50, 0.85, 2, 50, 2, 65
+                        assert dynamic['s70_soft']==soft and dynamic['s70_hard']==hard and dynamic['s70_release']==release
+                        assert dynamic['s70_confirm_samples']==confirm
+                        assert dynamic['s70_soft_rate']==soft_rate
+                        assert dynamic['request_spacing_seconds']==spacing and dynamic['request_spacing_always_on'] is True
+                        if spawn_guard_float:
+                            assert dynamic['s70_float_hi']==74
+                            assert dynamic['s70_float_count_min']==0.50 and dynamic['s70_float_size_min']==0.32
+                            assert 's70_soft_keep' not in dynamic and 's70_soft_keep_count' not in dynamic
+                        elif spawn_guard_h200:
+                            assert dynamic['s70_soft_keep_count']==0.95 and dynamic['s70_soft_keep_size']==0.60
+                            assert 's70_soft_keep' not in dynamic
+                        elif spawn_guard_h170:
+                            assert dynamic['s70_soft_keep_count']==0.80 and dynamic['s70_soft_keep_size']==0.40
+                            assert 's70_soft_keep' not in dynamic
+                        else:
+                            soft_keep = 0.55 if spawn_guard_h150 else 0.40
+                            assert dynamic['s70_soft_keep']==soft_keep
                 else:
                     assert dynamic['threshold_gt']==95 and dynamic['immediate_gt']==100
                     assert dynamic['hold_seconds']==10
                     assert dynamic['patrol_count']==1 and dynamic['patrol_size']==1
                     assert dynamic['patrol_rate_factor']==0.5
-                assert dynamic['switch']==('soft_limit_and_progression_and_extraction' if combined else 'soft_limit_only')
+                if spawn_guard:
+                    assert dynamic['switch']=='spawn_guard_mission_gate_soft_spacing'
+                else:
+                    assert dynamic['switch']==('soft_limit_and_progression_and_extraction' if combined else 'soft_limit_only')
                 assert dynamic['progression']==('all_13_blocks_exact_1' if combined else 'always_initial_tier')
                 if combined:
                     assert dynamic['progression_floats']==65 and dynamic['progression_zero_policy']=='set_to_1'

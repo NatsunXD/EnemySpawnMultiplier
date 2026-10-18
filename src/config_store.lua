@@ -19,7 +19,12 @@ return function(options)
     M.FILENAME = options.filename or 'EnemySpawnMultiplier.cfg'
 
     -- Written in this order so the file is stable and diffable.
-    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset', 'fast_corpse', 'dynamic_spawn', 'language'}
+    M.FIELDS = {'budget', 'patrol_count', 'patrol_size', 'encounter_cd', 'patrol_cd', 'preset',
+                'fast_corpse', 'dynamic_spawn', 'guard_mission', 'guard_patrol_gate', 'guard_soft_pop', 'language'}
+    local BOOL_FIELDS = {
+        fast_corpse = true, dynamic_spawn = true,
+        guard_mission = true, guard_patrol_gate = true, guard_soft_pop = true,
+    }
 
     -- Same ranges the panel and patch.configure() enforce. Values read back out
     -- of range are clamped here so a corrupt file degrades to a valid profile
@@ -69,7 +74,7 @@ return function(options)
                     lines[#lines + 1] = key .. '=' .. value
                 elseif type(value) == 'string' and PRESETS[value] then
                     lines[#lines + 1] = key .. '=' .. value
-                elseif (key == 'fast_corpse' or key == 'dynamic_spawn') and type(value) == 'boolean' then
+                elseif BOOL_FIELDS[key] and type(value) == 'boolean' then
                     lines[#lines + 1] = key .. '=' .. (value and 'true' or 'false')
                 end
             end
@@ -91,7 +96,7 @@ return function(options)
                         if PRESETS[value] then settings.preset = value end
                     elseif key == 'language' then
                         if value == 'zh' or value == 'en' then settings.language = value end
-                    elseif key == 'fast_corpse' or key == 'dynamic_spawn' then
+                    elseif BOOL_FIELDS[key] then
                         if value == 'true' then settings[key] = true
                         elseif value == 'false' then settings[key] = false end
                     elseif LIMITS[key] then

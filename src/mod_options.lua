@@ -15,6 +15,9 @@ return function(config, options)
         {key='preset', type='choice', choices={'heavy','light_medium','native'}, label='presets'},
         {key='fast_corpse', type='toggle'},
         {key='dynamic_spawn', type='toggle'},
+        {key='guard_mission', type='toggle'},
+        {key='guard_patrol_gate', type='toggle'},
+        {key='guard_soft_pop', type='toggle'},
         {key='language', type='choice', choices={'chinese','english'}, values={'zh','en'}},
     }
     local function emit(kind, detail) pcall(log, kind, detail or '') end
@@ -73,7 +76,6 @@ return function(config, options)
                 spec.choices = {}
                 for index, key in ipairs(row.choices) do spec.choices[index] = text(key) end
             elseif row.type == 'slider' then spec.min, spec.max, spec.step = row.min, row.max, row.step end
-            if row.key=='dynamic_spawn' then spec.description=nil end
             local ok, accepted, reason = pcall(menu.register_option, prefix .. row.key, spec)
             if not ok or not accepted then fail(ok and reason or accepted); return end
             M.registered = M.registered + 1
@@ -96,7 +98,7 @@ return function(config, options)
             if not accepted then emit('mods_menu_saved_rejected', tostring(reason)) end
         end
         -- No outstanding user edits exist at startup, so settle every row once.
-        if push(config.current()) then emit('mods_menu_ready', '9 options; F8 and MODS share one profile') end
+        if push(config.current()) then emit('mods_menu_ready', '12 options; F8 and MODS share one profile') end
     end
     function M.pump(dt)
         if M.status == 'waiting' then

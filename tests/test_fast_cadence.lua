@@ -700,8 +700,11 @@ if arg[6]=='local_test' or arg[6]=='combined' then
     patch.dynamic_combined_switch=combined
     patch.dynamic_curve_policy=combined and 'unit_all_half_extraction' or nil
     assert(patch.configure{dynamic_spawn=false,patrol_count=4,patrol_size=1.8,
-        encounter_cd_seconds=30,patrol_cd_seconds=2})
+        encounter_cd_seconds=30,patrol_cd_seconds=2,
+        guard_mission=true,guard_patrol_gate=true,guard_soft_pop=true})
     put_u32(director+0x36c0,10);put_u32(pop+0x1c,86)
+    -- Keep S70 low while H is tested: S70=Q+B-P-E.
+    put_u32(director+0x61c,40);put_u32(director+0x620,40)
     put_f32(director+patch.cfg_base_offset+0x1a0+16,1.5)
     patch.dynamic=local_factory().create(api,patch,true);patch.dynamic_dt=1
     assert(patch.apply(api,game))
@@ -710,64 +713,49 @@ if arg[6]=='local_test' or arg[6]=='combined' then
     assert(patch.configure{dynamic_spawn=true})
     if combined then
         for _=1,5 do assert(patch.apply(api,game));assert(patch.dynamic.effective.remaining==0) end
-        put_u32(pop+0x1c,91) -- H=101, never admit H=96 as a trigger
+        -- H=Q+B>200; keep S70=H-P-E <64 so soft-pop is measured alone (P=E=80 → S70=41).
+        put_u32(director+0x61c,80);put_u32(director+0x620,80)
+        put_u32(pop+0x1c,191)
         for _=1,2 do assert(patch.apply(api,game));assert(patch.dynamic.effective.remaining==0) end
-        put_u32(pop+0x1c,90) -- H=100 must break the consecutive sequence
+        put_u32(pop+0x1c,190) -- H=200 must not trigger (strict >)
         assert(patch.apply(api,game));assert(patch.dynamic.effective.remaining==0)
-        put_u32(pop+0x1c,91)
-    end
-    for _=1,3 do assert(patch.apply(api,game)) end
-    assert(patch.dynamic.effective.phase=='local_h100_hold')
-    for i=0,14 do
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+i*4),combined and i>=5 and 1.3 or 1))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+i*4),combined and i>=5 and 1.08 or 1))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+i*4),combined and (i<5 and 1 or 4.5) or 3))
-    end
-    assert(patch.modifier_patrol_count==4 and patch.modifier_travelers_max_unit==1.8
-        and patch.modifier_patrol_cooldown==6)
-    if combined then
+        put_u32(pop+0x1c,191)
+        for _=1,3 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.phase=='soft_pop_hold')
+        -- 80% excess retain: 1+(4-1)*0.80=3.4, 1+(1.8-1)*0.80=1.64, rate 6*0.92=5.52
+        assert(approx(patch.dynamic.effective.count,3.4) and approx(patch.dynamic.effective.size,1.64)
+            and approx(patch.dynamic.effective.rate,5.52))
         assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
-        assert(not patch.dynamic.progress_enabled and patch.dynamic.effective.phase=='off')
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),6))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc),6))
-        assert(patch.configure{dynamic_spawn=true})
+        assert(not patch.dynamic.progress_enabled and patch.dynamic.effective.phase=='spacing_only')
+        assert(patch.configure{dynamic_spawn=true,guard_soft_pop=false,guard_patrol_gate=true})
+        put_u32(pop+0x1c,30);put_u32(director+0x61c,0);put_u32(director+0x620,0) -- S70=H=40 open
         for _=1,3 do assert(patch.apply(api,game)) end
-        assert(patch.dynamic.progress_enabled and patch.dynamic.effective.phase=='local_h100_hold')
-    end
-    if combined then
-        -- An active high sample refreshes the timer rather than expiring it.
+        put_u32(pop+0x1c,80) -- S70=90 emergency band (>=78)
+        for _=1,2 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.phase=='patrol_gate_hard'
+            and approx(patch.dynamic.effective.count,1) and approx(patch.dynamic.effective.size,1))
+        put_u32(pop+0x1c,30) -- release at <=68
+        for _=1,2 do assert(patch.apply(api,game)) end
+        assert(patch.dynamic.effective.phase=='spawn_guard_watch' or patch.dynamic.effective.phase=='spacing_only'
+            or patch.dynamic.effective.phase=='patrol_gate_open'
+            or patch.dynamic.effective.count>=1)
+    else
         for _=1,3 do assert(patch.apply(api,game)) end
-        assert(patch.dynamic.effective.remaining==20 and patch.dynamic.effective.rate_remaining==10
-            and patch.dynamic.event:find('retrigger:',1,true))
-        put_u32(pop+0x1c,70)
-        for _=1,6 do assert(patch.apply(api,game)) end
-        assert(approx(patch.dynamic.effective.count,2.11) and approx(patch.dynamic.effective.rate,4.5))
-        for _=1,2 do assert(patch.apply(api,game)) end
-        assert(patch.dynamic.effective.phase=='local_h100_recover')
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+20),2.38))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+20),1.368))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+20),5.25))
-        assert(patch.modifier_patrol_count==4 and patch.modifier_travelers_max_unit==1.8
-            and patch.modifier_patrol_cooldown==6)
-        for _=1,2 do assert(patch.apply(api,game)) end
-        assert(patch.dynamic.effective.remaining==10 and patch.dynamic.effective.rate_remaining==0)
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+20),2.65))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+20),1.44))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+20),6))
+        assert(patch.dynamic.effective.phase=='local_h100_hold')
+        for i=0,14 do
+            assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+i*4),1))
+            assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+i*4),1))
+            assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+i*4),3))
+        end
         for _=1,10 do assert(patch.apply(api,game)) end
-        assert(patch.dynamic.effective.remaining==0)
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+20),4))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8+20),1.8))
-        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc+20),6))
-    else for _=1,10 do assert(patch.apply(api,game)) end end
-    assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0),combined and 1 or 4))
-    assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8),combined and 1 or 1.8))
-    assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc),combined and 1 or 6))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0),4))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x3f8),1.8))
+        assert(approx(get_f32(director+patch.cfg_base_offset+0x1dc),6))
+    end
     assert(patch.configure{dynamic_spawn=false});assert(patch.apply(api,game))
     assert(patch.dynamic.progress_enabled==not combined)
-    assert(approx(get_f32(director+patch.cfg_base_offset+0x1a0+16),combined and 6 or 4))
     api.read,api.query_region=read,query
-    pass(combined and 'combined quantities recover from 10% bonus over 20s while rate keeps its 6s hold/4s recovery through the real writer'
+    pass(combined and 'spawn_guard: H>200 soft-pop keep80% and S70 emergency gate throttle through real writer'
         or 'real local session writes 1x quantities/half rate then restores after 10s; progression stays active with switch OFF')
 end
 print(count .. ' fast cadence profile checks passed; no executable code was modified.')

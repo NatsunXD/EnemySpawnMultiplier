@@ -36,7 +36,10 @@ local patch = {
     modifier_patrol_cooldown = 0,      -- cfg+0x1DC patrol_spawn_cooldown_rate_modifier
     modifier_travelers_max_unit = 0,   -- cfg+0x3F8 travelers_max_unit_count_multiplier
     modifier_state_key = 'none',
-    dynamic_spawn_enabled = true,
+    dynamic_spawn_enabled = true, -- master: 动态生成节流
+    guard_mission = true,         -- 任务进度与撤离保护
+    guard_patrol_gate = true,     -- 巡逻门槛节流 (S70)
+    guard_soft_pop = true,        -- 总人口软上限 (H)
     guardforce_write_enabled = true,
     template_bias_enabled = false,
     template_bias_light = 3.6,
@@ -217,6 +220,11 @@ function patch.configure(settings)
     if settings.dynamic_spawn ~= nil and type(settings.dynamic_spawn) ~= 'boolean' then
         return false, 'dynamic_spawn_not_boolean'
     end
+    for _, key in ipairs({'guard_mission', 'guard_patrol_gate', 'guard_soft_pop'}) do
+        if settings[key] ~= nil and type(settings[key]) ~= 'boolean' then
+            return false, key .. '_not_boolean'
+        end
+    end
 
     if next_budget then
         patch.budget_multiplier = next_budget
@@ -229,6 +237,9 @@ function patch.configure(settings)
     if next_patrol_count then patch.modifier_patrol_count = next_patrol_count end
     if next_patrol_size then patch.modifier_travelers_max_unit = next_patrol_size end
     if settings.dynamic_spawn ~= nil then patch.dynamic_spawn_enabled=settings.dynamic_spawn end
+    if settings.guard_mission ~= nil then patch.guard_mission=settings.guard_mission end
+    if settings.guard_patrol_gate ~= nil then patch.guard_patrol_gate=settings.guard_patrol_gate end
+    if settings.guard_soft_pop ~= nil then patch.guard_soft_pop=settings.guard_soft_pop end
     if next_encounter_cd then
         local rate, clamp, seconds = cooldown_profile(next_encounter_cd, patch.cooldown_fast_rate)
         if not rate then return false, 'encounter_cd_profile_mismatch' end

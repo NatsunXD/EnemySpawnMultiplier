@@ -47,11 +47,13 @@ local config,patch,stats=fresh()
 local menu=fake_menu()
 local bridge=create_options(config,{get_menu=function() return menu end})
 bridge.pump(0.1)
-assert(bridge.status=='ready' and bridge.registered==9)
+assert(bridge.status=='ready' and bridge.registered==12)
 local calls,writes=stats()
 assert(calls==0 and writes==0,'unchanged startup must not rewrite profile')
 assert(menu.get(prefix..'dynamic_spawn')==true)
-pass('registers nine options with default-on compensation without extra writes')
+assert(menu.get(prefix..'guard_mission')==true and menu.get(prefix..'guard_patrol_gate')==true
+    and menu.get(prefix..'guard_soft_pop')==true)
+pass('registers twelve options with default-on spawn guard without extra writes')
 
 menu.apply({[prefix..'budget']=3.5,[prefix..'patrol_count']=2.5,
     [prefix..'patrol_size']=0.5,[prefix..'encounter_cd']=12,[prefix..'patrol_cd']=18,

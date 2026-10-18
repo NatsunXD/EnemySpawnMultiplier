@@ -1,5 +1,6 @@
 return function(create_api, patch, build, create_panel, create_model, create_bindings, create_anchors,
-                create_store, create_diag, create_corpse, create_config, create_options, create_sos, create_dynamic)
+                create_store, create_diag, create_corpse, create_config, create_options, create_sos, create_dynamic,
+                create_peer, create_privacy_gate)
     if _G.EnemySpawnMultiplier then return end
     local state = {revision = build.revision, active = false, status = '', detail = '', elapsed = 1.0}
     _G.EnemySpawnMultiplier = state
@@ -77,8 +78,11 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     -- the chosen file afterwards.
     local PRIVACY_PUBLIC = 0
     local privacy = {raw = nil, label = 'unknown', public = false, path = nil, last_log = nil}
-    -- Created after the Windows API is up; diag_snapshot closes over this binding.
+    -- Created after the Windows API is up; diag_snapshot closes over these bindings.
     local sos_probe = nil
+    local peer_probe = nil
+    local privacy_gate = nil
+    local gate_state = nil
     local function find_user_settings(directory)
         local ok, chosen = pcall(function()
             local ffi = require('ffi')
@@ -169,6 +173,10 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             string.format('bb_alerts=%d', blackbox.alerts),
             string.format('privacy=%s', tostring(privacy.label)),
             string.format('privacy_raw=%s', tostring(privacy.raw)),
+            string.format('contaminated=%s', tostring(gate_state and gate_state.contaminated or false)),
+            string.format('contaminate_reason=%s', tostring(gate_state and gate_state.reason or '-')),
+            string.format('peer_count=%s', tostring(peer_probe and peer_probe.count or '-')),
+            string.format('peer_solo=%s', tostring(peer_probe and peer_probe.solo or false)),
             string.format('sos_build=%s', tostring(sos_probe and sos_probe.build or 'absent')),
             string.format('sos_sticky=%s', tostring(sos_probe and sos_probe.sticky or false)),
             string.format('sos_unsupported=%s', tostring(sos_probe and sos_probe.unsupported or false)),
@@ -279,8 +287,10 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             local made,session=pcall(module.create,api,patch,identity=='known_build',false)
             if made and session then patch.dynamic=session end
         end
-        log_line('dynamic_ready',patch.dynamic and (patch.dynamic.mode=='h100_compensation'
-            and 'ready; mode=h100_compensation H>95 x3 or H>100 hold_s=10 rate=half switch=soft_limit_and_progression diagnostics=70/100'
+        log_line('dynamic_ready',patch.dynamic and (patch.dynamic.mode=='spawn_guard'
+            and 'ready; mode=spawn_guard S70 float64-74 c50%/s32%/r82% hard78x2 rel68 H>200 x3 keep80% 20s spacing=0.5s mission/gate/soft toggles sample_s=1'
+            or patch.dynamic.mode=='h100_compensation'
+            and 'ready; mode=h100_compensation legacy'
             or patch.dynamic.mode=='local_h100_test'
             and 'ready; mode=local_h100_test H>95 x3 or H>100 hold_s=10 rate=half progression=always_initial_tier'
             or 'ready; mode=progression_only pressure_feedback=off sample_s=none progression=initial_tier') or 'unavailable')
@@ -327,6 +337,36 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         end
     else
         log_line('bb_sos', 'probe=absent')
+    end
+    if create_peer then
+        local built, module = pcall(create_peer)
+        if built and type(module) == 'table' and type(module.create) == 'function' then
+            local made, session = pcall(module.create, api)
+            if made and session then
+                peer_probe = session
+                log_line('bb_peer', 'probe=ready interval=5s fail_closed_non_solo=1')
+            else
+                log_line('bb_peer', 'probe=create_failed ' .. tostring(session))
+            end
+        else
+            log_line('bb_peer', 'probe=module_failed ' .. tostring(module))
+        end
+    else
+        log_line('bb_peer', 'probe=absent')
+    end
+    if create_privacy_gate then
+        local built, module = pcall(create_privacy_gate)
+        if built and type(module) == 'table' and type(module.new) == 'function' then
+            privacy_gate = module
+            gate_state = module.new()
+            log_line('bb_privacy_gate', string.format(
+                'ready public_hold_s=%.0f friends_clear_s=%.0f solo_bypass=1',
+                tonumber(module.PUBLIC_HOLD_S) or 6, tonumber(module.FRIENDS_CLEAR_S) or 180))
+        else
+            log_line('bb_privacy_gate', 'create_failed ' .. tostring(module))
+        end
+    else
+        log_line('bb_privacy_gate', 'absent')
     end
 
     -- Fast corpse decay. Runs on its own interval (it accumulates dt internally),
@@ -409,11 +449,9 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
     local stopped, elapsed = false, 0
     local privacy_elapsed = 1.0
     local sos_elapsed = 1.9
+    local peer_elapsed = 4.5
     local SOS_INTERVAL = 2.0
-    -- Once Public is seen while a mission is live, keep spawn/corpse gated until
-    -- back on the ship. Flipping Friends mid-mission used to re-enable writes into
-    -- a live director and correlated with a hard crash (diag 20260926-182912).
-    local privacy_sticky = false
+    local PEER_INTERVAL = 5.0
     local lobby_gated = false
     local function mission_live()
         if type(patch.in_mission) ~= 'function' then return false end
@@ -426,38 +464,71 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
         if elapsed < 0.1 then return end
         local step_dt=math.min(elapsed,1)
         elapsed = 0
+        local privacy_sampled = false
         privacy_elapsed = privacy_elapsed + 0.1
         if privacy_elapsed >= 2.0 then
             privacy_elapsed = 0
+            privacy_sampled = true
             read_privacy()
             local marker = string.format('%s/%s', tostring(privacy.label), tostring(privacy.raw))
             if marker ~= privacy.last_log then
                 privacy.last_log = marker
-                log_line('bb_privacy', string.format('privacy=%s raw=%s public=%s sticky=%s',
+                log_line('bb_privacy', string.format(
+                    'privacy=%s raw=%s public=%s contaminated=%s reason=%s',
                     tostring(privacy.label), tostring(privacy.raw), tostring(privacy.public),
-                    tostring(privacy_sticky)))
+                    tostring(gate_state and gate_state.contaminated or false),
+                    tostring(gate_state and gate_state.reason or '-')))
+            end
+            if privacy_gate and gate_state then
+                if privacy_gate.on_privacy_sample(gate_state, privacy.public == true,
+                    privacy_gate.PRIVACY_SAMPLE_S) then
+                    log_line('bb_privacy_latch', string.format(
+                        'contaminated reason=%s hold_s=%.1f',
+                        tostring(gate_state.reason), tonumber(gate_state.public_hold_s) or 0))
+                end
             end
         end
+
+        peer_elapsed = peer_elapsed + 0.1
+        if peer_probe and peer_elapsed >= PEER_INTERVAL then
+            peer_elapsed = 0
+            local ok, count_or_err, detail = pcall(peer_probe.probe, game)
+            if not ok then
+                log_line('bb_peer', 'probe_error ' .. tostring(count_or_err))
+            else
+                local marker = tostring(detail or '')
+                if marker ~= '' and marker ~= peer_probe._last_log then
+                    peer_probe._last_log = marker
+                    log_line('bb_peer', marker)
+                end
+            end
+        end
+
         local live = mission_live()
-        if privacy.public then
-            privacy_sticky = true
+        if privacy_gate and gate_state then
+            if live and not gate_state.was_live and not privacy_sampled then
+                read_privacy()
+            end
+            local edges = privacy_gate.on_mission_edge(gate_state, live, privacy.public == true)
+            for index = 1, #edges do
+                log_line('bb_privacy_latch', edges[index])
+            end
+            local cleared, previous_reason, how = privacy_gate.on_ship_tick(
+                gate_state, live, privacy.public == true, step_dt)
+            if cleared then
+                log_line('bb_privacy_latch', string.format(
+                    'cleared:%s:%s', tostring(how), tostring(previous_reason)))
+            end
         end
-        if not live and privacy_sticky and not privacy.public then
-            log_line('bb_privacy_latch', 'cleared on ship')
-            privacy_sticky = false
-        elseif not live then
-            privacy_sticky = privacy.public
-        end
-        local privacy_gated = privacy.public or privacy_sticky
 
         -- SOS probe: low-frequency while a mission is live and the lobby is not
-        -- already gated. After sticky/unsupported, scanning stops until ship
-        -- (sticky) or process exit (unsupported / build mismatch).
+        -- already gated. Sticky latch resets on ship so the next mission can
+        -- probe again; contamination from SOS persists until privacy_gate clears.
         local sos_gated = false
         local sos_reason = nil
         if sos_probe then
             if not live and sos_probe.sticky then
-                log_line('bb_sos_latch', 'cleared on ship')
+                log_line('bb_sos_latch', 'sticky cleared on ship; contamination may remain')
                 sos_probe.reset_latch()
             end
             if sos_probe.unsupported then
@@ -470,7 +541,8 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
             else
                 local need_build = sos_probe.build == 'pending'
                 local scan = false
-                if need_build or (live and not privacy_gated) then
+                local already_gated = gate_state and gate_state.contaminated == true
+                if need_build or (live and not already_gated) then
                     sos_elapsed = sos_elapsed + 0.1
                     if sos_elapsed >= SOS_INTERVAL then
                         sos_elapsed = 0
@@ -497,18 +569,27 @@ return function(create_api, patch, build, create_panel, create_model, create_bin
                     end
                 end
             end
+            if sos_gated and privacy_gate and gate_state and sos_reason == 'privacy_gate_sos' then
+                if privacy_gate.on_sos(gate_state) then
+                    log_line('bb_privacy_latch', 'contaminated reason=sos')
+                end
+            end
         end
 
-        lobby_gated = privacy_gated or sos_gated
+        local solo = peer_probe and peer_probe.solo == true
+        local gate_reason = nil
+        if privacy_gate and gate_state then
+            lobby_gated, gate_reason = privacy_gate.should_gate(gate_state, solo, sos_gated)
+        else
+            lobby_gated = sos_gated
+            gate_reason = sos_gated and (sos_reason or 'privacy_gate_sos') or nil
+        end
         local t0 = now_clock()
         local called, accepted, reason, active
         if lobby_gated then
-            -- Public, SOS-spent, or SOS probe unavailable: do not write multipliers.
-            if privacy_gated then
-                called, accepted, reason, active = true, true, 'privacy_gate_public', false
-            else
-                called, accepted, reason, active = true, true, tostring(sos_reason or 'privacy_gate_sos'), false
-            end
+            -- Contaminated lobby, SOS-spent, or SOS probe unavailable: no multipliers.
+            called, accepted, reason, active = true, true,
+                tostring(gate_reason or sos_reason or 'privacy_gate_contaminated'), false
         else
             patch.dynamic_dt=step_dt
             called, accepted, reason, active = pcall(patch.apply, api, game)

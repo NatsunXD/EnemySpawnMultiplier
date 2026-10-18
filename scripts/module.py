@@ -42,6 +42,8 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
                          ('corpse_decayer_data', 'corpse_decayer_data.lua'),
                          ('create_corpse', 'corpse_clear.lua')]
     source_pairs += [('create_sos', 'sos_probe.lua'),
+                     ('create_peer', 'peer_probe.lua'),
+                     ('create_privacy_gate', 'privacy_gate.lua'),
                      ('create_anchors', 'anchor_check.lua'),
                      ('install_loader', 'archive_loader.lua')]
     if not with_panel:
@@ -78,7 +80,7 @@ def build_module(root, build, module_name, patch_name, revision, template_bias=F
                "end\n")
     module += f"install_loader(create_api, patch, {{revision = '{revision}', "
     module += f"exe_sha256 = '{EXE_SHA}', game_sha256 = '{GAME_DLL_SHA}'"
-    module += '}, create_panel, create_model, create_bindings, create_anchors, create_store, create_diag, create_corpse_bound, create_config, create_options, create_sos, create_dynamic)\n'
+    module += '}, create_panel, create_model, create_bindings, create_anchors, create_store, create_diag, create_corpse_bound, create_config, create_options, create_sos, create_dynamic, create_peer, create_privacy_gate)\n'
     path, output = build / 'mod.wrapper.lua', build / 'mod.ljbc'
     path.write_text(module, encoding='utf-8', newline='\n')
     env = dict(os.environ, LUA_PATH=str(LUA.parent / '?.lua') + ';;')

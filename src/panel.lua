@@ -249,7 +249,7 @@ return function(create_model, patch, callbacks)
     local SW_HIDE, SW_SHOW = 0, 5
     local PM_REMOVE = 1
     local HTCLIENT = 1
-    local DT_LEFT, DT_VCENTER, DT_SINGLELINE, DT_CENTER = 0, 4, 0x20, 1
+    local DT_LEFT, DT_VCENTER, DT_SINGLELINE, DT_CENTER, DT_CALCRECT = 0, 4, 0x20, 1, 0x400
     local TRANSPARENT = 1
     local SRCCOPY = 0x00CC0020
     local IDC_ARROW = ffi.cast('const char *', 32512)
@@ -276,7 +276,7 @@ return function(create_model, patch, callbacks)
     -- Three fixed fonts, created once and released with the window. Private
     -- function pointers preserve the shared-FFI collision protection.
     local fonts = {}
-    for name,spec in pairs({body={16,600},small={13,500},heading={26,700}}) do
+    for name,spec in pairs({body={16,600},small={13,500},small_bold={13,700},heading={26,700}}) do
         local font=gdi32.CreateFontA(-spec[1],0,0,0,spec[2],0,0,0,1,0,0,5,0,'Microsoft YaHei UI')
         if font~=nil then fonts[name]=font end
     end
@@ -284,7 +284,11 @@ return function(create_model, patch, callbacks)
         for name,font in pairs(fonts) do gdi32.DeleteObject(font);fonts[name]=nil end
     end
 
-    local CLIENT_W, CLIENT_H = model.CLIENT_W, model.CLIENT_H
+    local function client_size()
+        return model.CLIENT_W, model.client_height and model.client_height() or model.CLIENT_H
+    end
+    local CLIENT_W, CLIENT_H = client_size()
+    local panel -- forward decl for resize helper
 
     -- UTF-8 to UTF-16 for DrawTextW. The ANSI DrawTextA entry point would render
     -- the Chinese labels as mojibake on a non-UTF-8 system code page.
@@ -302,7 +306,18 @@ return function(create_model, patch, callbacks)
     -- ship is committed immediately but only takes effect once a mission starts,
     -- so the panel must say which of the two it is.
     local runtime = callbacks.state
-    local panel = {open = false, dragging_window = false, drag_slider = nil,
+    local function sync_client_size()
+        CLIENT_W, CLIENT_H = client_size()
+        model.CLIENT_H = CLIENT_H
+        if panel and panel.window then
+            local rect = ffi.new(RECT)
+            if user32.GetWindowRect(panel.window, rect) ~= 0 then
+                user32.MoveWindow(panel.window, rect.left, rect.top, CLIENT_W, CLIENT_H, 1)
+            end
+        end
+    end
+
+    panel = {open = false, dragging_window = false, drag_slider = nil,
                    status = '', status_until = 0, model = model,
                    toggle_hint = model.text('toggle')}
 
@@ -484,6 +499,39 @@ return function(create_model, patch, callbacks)
         if previous then gdi32.SelectObject(dc,previous) end
     end
 
+    -- Measure UTF-8 tip segments so a short phrase can be drawn in small_bold.
+    local function measure_text(dc, text, font)
+        if type(text) ~= 'string' or text == '' then return 0 end
+        local buffer, length = wide(text)
+        if not buffer then return 0 end
+        local rect = ffi.new(RECT, 0, 0, 0, 0)
+        local handle = fonts[font or 'body']
+        local previous = handle and gdi32.SelectObject(dc, handle)
+        user32.DrawTextW(dc, buffer, length, rect, DT_CALCRECT + DT_SINGLELINE + DT_LEFT)
+        if previous then gdi32.SelectObject(dc, previous) end
+        return rect.right - rect.left
+    end
+
+    local function draw_tip_text(dc, text, x, y, w, h)
+        local bold = (model.language == 'en') and 'preventing crashes' or '防止崩溃'
+        local i, j = string.find(text, bold, 1, true)
+        if not i or not fonts.small_bold then
+            draw_text(dc, text, x, y, w, h, C_TITLE, false, 'small')
+            return
+        end
+        local before, mid, after = text:sub(1, i - 1), text:sub(i, j), text:sub(j + 1)
+        local cursor = x
+        if before ~= '' then
+            draw_text(dc, before, cursor, y, w, h, C_TITLE, false, 'small')
+            cursor = cursor + measure_text(dc, before, 'small')
+        end
+        draw_text(dc, mid, cursor, y, math.max(0, w - (cursor - x)), h, C_TITLE, false, 'small_bold')
+        cursor = cursor + measure_text(dc, mid, 'small_bold')
+        if after ~= '' then
+            draw_text(dc, after, cursor, y, math.max(0, w - (cursor - x)), h, C_TITLE, false, 'small')
+        end
+    end
+
     local function frame(dc,x,y,w,h,edge,background)
         fill(dc,x,y,w,h,edge)
         fill(dc,x+1,y+1,w-2,h-2,background)
@@ -528,10 +576,11 @@ return function(create_model, patch, callbacks)
         panel.toggle_hint = model.text(panel.custom_binding and 'custom_key' or 'toggle')
         frame(memory,width-108,22,88,28,C_TRACK,C_BG)
         draw_text(memory, panel.toggle_hint, width - 108, 22, 88, 28, C_LABEL,true,'small')
+        local widgets = model.layout()
+        CLIENT_W, CLIENT_H = client_size()
         frame(memory,20,84,width-40,246,C_BORDER,C_BAR)
         section(memory,model.text('spawn_section'),88)
 
-        local widgets = model.layout()
         for _, item in ipairs(widgets.sliders) do
             if hovered('slider',item) or (panel.drag_slider and panel.drag_slider.key==item.key) then
                 fill(memory,28,item.y,width-56,item.h,C_BUTTON)
@@ -550,8 +599,6 @@ return function(create_model, patch, callbacks)
                 draw_text(memory, model.text('fast'), track_x - 38, item.y, 32, item.h, C_DIM, true,'small')
                 draw_text(memory, model.text('slow'), track_x + track_w + 12, item.y, 60, item.h, C_DIM, true,'small')
             else
-                -- The value turns red while this row is over its risk threshold, so
-                -- the cause of the corner warning is visible at a glance.
                 local value_color = model.at_risk(item) and C_DANGER or C_TITLE
                 frame(memory,item.x+item.w-62,item.y+5,62,26,C_BORDER,C_BG)
                 draw_text(memory, model.format(item), item.x + item.w - 62, item.y+5, 62, 26, value_color,true)
@@ -561,17 +608,27 @@ return function(create_model, patch, callbacks)
         section(memory,model.text('assist_section'),344)
         for _, item in ipairs(widgets.checkboxes or {}) do
             local checked = model.pending[item.key] and true or false
+            local master_off = item.tip and not model.pending.dynamic_spawn
             frame(memory,item.x,item.y,item.w,item.h,hovered('checkbox',item) and C_ACCENT or C_BORDER,C_BAR)
-            local label=model.text(item.key=='fast_corpse' and 'fast_corpse_short' or 'dynamic_spawn_short')
-            local label_y=item.key=='fast_corpse' and 3 or 11
-            draw_text(memory,label,item.x+12,item.y+label_y,item.w-60,22,checked and C_TITLE or C_LABEL)
-            if item.key=='fast_corpse' then
+            local label = item.key == 'fast_corpse' and model.text('fast_corpse_short')
+                or item.key == 'dynamic_spawn' and model.text('dynamic_spawn_short')
+                or item.label
+            local label_y = item.key == 'fast_corpse' and 3 or (item.tip and 6 or 9)
+            draw_text(memory,label,item.x+12,item.y+label_y,item.w-60,22,
+                (checked and not master_off) and C_TITLE or C_LABEL)
+            if item.key == 'fast_corpse' then
                 draw_text(memory,model.text('fast_corpse_hint'),item.x+12,item.y+24,item.w-24,17,C_DIM,false,'small')
             end
-            local badge_y=item.key=='fast_corpse' and 7 or 14
-            fill(memory,item.x+item.w-42,item.y+badge_y,32,17,checked and C_ACCENT or C_TRACK)
-            draw_text(memory,model.text(checked and 'enabled' or 'disabled'),item.x+item.w-42,item.y+badge_y,
-                32,17,checked and C_INK or C_TITLE,true,'small')
+            local badge_y = item.key == 'fast_corpse' and 7 or (item.tip and 8 or 11)
+            local on = checked and not master_off
+            fill(memory,item.x+item.w-42,item.y+badge_y,32,17,on and C_ACCENT or C_TRACK)
+            draw_text(memory,model.text(on and 'enabled' or 'disabled'),item.x+item.w-42,item.y+badge_y,
+                32,17,on and C_INK or C_TITLE,true,'small')
+        end
+        if widgets.fold then
+            local f = widgets.fold
+            frame(memory,f.x,f.y,f.w,f.h,hovered('fold',f) and C_ACCENT or C_BORDER,C_BUTTON)
+            draw_text(memory, model.guard_expanded and '▲' or '▼', f.x, f.y, f.w, f.h, C_TITLE, true)
         end
 
         section(memory,model.text('composition_section'),model.PRESET_HEADER_Y)
@@ -590,8 +647,6 @@ return function(create_model, patch, callbacks)
             draw_text(memory,item.label,item.x,item.y,item.w,item.h,item.accent and C_INK or C_TITLE,true)
         end
 
-        -- Prefer the transient apply result; otherwise state what the committed
-        -- configuration will do, so "did it apply?" is never ambiguous.
         local footer, footer_color = nil, C_OK
         if runtime and runtime.active == false then
             footer, footer_color = model.text('waiting'), C_WARN
@@ -601,19 +656,28 @@ return function(create_model, patch, callbacks)
         if panel.status ~= '' and os.clock() < panel.status_until then
             footer, footer_color = panel.status, C_OK
         end
-        fill(memory,32,576,width-64,1,C_BORDER)
-        fill(memory,32,589,5,5,footer_color)
-        draw_text(memory, footer, 46, 581, CLIENT_W - 78, 22, footer_color,false,'small')
+        local footer_y = model.FOOTER_Y or (CLIENT_H - 60)
+        fill(memory,32,footer_y,width-64,1,C_BORDER)
+        fill(memory,32,footer_y+13,5,5,footer_color)
+        draw_text(memory, footer, 46, footer_y+5, CLIENT_W - 78, 22, footer_color,false,'small')
 
-        -- High-pressure warning at the bottom. It reflects the editor state, so it
-        -- appears as soon as a slider crosses the threshold and clears when the
-        -- player moves it back; Apply is not required.
         if model.pressure_warning() then
             local PRESSURE_WARNING = model.text('pressure')
             fill(memory,20,CLIENT_H-32,width-40,24,C_WARNING)
             fill(memory,20,CLIENT_H-32,3,24,C_DANGER)
             draw_text(memory, PRESSURE_WARNING, 32, CLIENT_H - 32,
                       CLIENT_W - 64, 24, C_DANGER,false,'small')
+        end
+
+        -- Hover tip for guard sub-options only (hidden unless hovered).
+        if panel.hover_tip and panel.hover_tip ~= '' then
+            local tip = panel.hover_tip
+            local tip_w = math.min(width - 48, 520)
+            local tip_h = 52
+            local tip_x, tip_y = 24, math.min(CLIENT_H - tip_h - 40, (panel.hover_tip_y or 500) + 36)
+            fill(memory, tip_x, tip_y, tip_w, tip_h, C_INK)
+            frame(memory, tip_x, tip_y, tip_w, tip_h, C_ACCENT, C_BAR)
+            draw_tip_text(memory, tip, tip_x + 10, tip_y + 6, tip_w - 20, tip_h - 12)
         end
 
         gdi32.BitBlt(dc, 0, 0, width, height, memory, 0, 0, SRCCOPY)
@@ -630,8 +694,21 @@ return function(create_model, patch, callbacks)
             panel.drag_slider = item
             model.set_slider(item, x)
             user32.InvalidateRect(panel.window, nil, 0)
+        elseif kind == 'fold' then
+            model.toggle_guard_fold()
+            sync_client_size()
+            user32.InvalidateRect(panel.window, nil, 0)
         elseif kind == 'checkbox' then
-            model.pending[item.key] = not model.pending[item.key]
+            if item.tip and not model.pending.dynamic_spawn then
+                -- Sub-toggles stay inert while the master guard is off.
+            else
+                model.pending[item.key] = not model.pending[item.key]
+                if item.key == 'dynamic_spawn' and model.pending.dynamic_spawn then
+                    model.pending.guard_mission = true
+                    model.pending.guard_patrol_gate = true
+                    model.pending.guard_soft_pop = true
+                end
+            end
             user32.InvalidateRect(panel.window, nil, 0)
         elseif kind == 'radio' then
             model.pending[item.key] = item.value
@@ -690,7 +767,11 @@ return function(create_model, patch, callbacks)
             local x, y = packed_xy(lparam)
             local kind,item=model.hit(x,y)
             local hover=item and hover_key(kind,item) or nil
-            if hover~=panel.hover then panel.hover=hover;user32.InvalidateRect(window,nil,0) end
+            local tip=model.tooltip_for and model.tooltip_for(kind,item) or nil
+            if hover~=panel.hover or tip~=panel.hover_tip then
+                panel.hover,panel.hover_tip,panel.hover_tip_y=hover,tip,item and item.y or y
+                user32.InvalidateRect(window,nil,0)
+            end
             if panel.drag_slider then
                 model.set_slider(panel.drag_slider, x)
                 user32.InvalidateRect(window, nil, 0)

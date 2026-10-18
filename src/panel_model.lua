@@ -12,8 +12,12 @@ return function()
             encounter_cd='增援 CD', patrol_cd='巡逻 CD',
             fast_corpse='尸体快速消失（保留布娃娃）',
             fast_corpse_short='尸体快速消失', fast_corpse_hint='保留布娃娃',
-            dynamic_spawn='动态生成补偿',
-            dynamic_spawn_short='动态生成补偿',
+            dynamic_spawn='动态生成节流',
+            dynamic_spawn_short='动态生成节流',
+            guard_mission='任务进度与撤离保护',
+            guard_patrol_gate='巡逻门槛节流',
+            guard_soft_pop='总人口软上限',
+            guard_fold='子项',
             console='EnemySpawnMultiplier', console_hint='by Natsun',
             spawn_section='01 / 生成参数', assist_section='02 / 辅助控制',
             composition_section='03 / 增援构成',
@@ -36,7 +40,10 @@ return function()
             encounter_cd_desc='目标增援间隔（秒）；30 秒使用原版节奏。',
             patrol_cd_desc='目标巡逻间隔（秒），通过倍率曲线近似；30 秒使用原版节奏。',
             fast_corpse_desc='加快尸体消失并保留布娃娃；关闭时恢复原值。',
-            dynamic_spawn_desc='',
+            dynamic_spawn_desc='能够在游戏压力过载时自动降速，减轻卡顿并防止崩溃。子项可单独开关。',
+            guard_mission_desc='控制以下情况是否增加刷怪速率：主线任务推进、在撤离点内、开启撤离后',
+            guard_patrol_gate_desc='接近巡逻队人口上限时降低巡逻请求',
+            guard_soft_pop_desc='调度压力偏高时临时降低刷怪压力',
             preset_desc='调整增援模板权重：重甲、轻中甲或原版。',
             language_desc='切换 ESM 的中英文。F8 面板即时刷新；MODS 文案在重新打开暂停菜单后刷新。',
         },
@@ -45,8 +52,12 @@ return function()
             encounter_cd='Reinf. CD', patrol_cd='Patrol CD',
             fast_corpse='Fast corpse decay (keep ragdolls)',
             fast_corpse_short='Fast corpse decay', fast_corpse_hint='Keep ragdolls',
-            dynamic_spawn='Dynamic spawn compensation',
-            dynamic_spawn_short='Dynamic compensation',
+            dynamic_spawn='Dynamic spawn throttle',
+            dynamic_spawn_short='Dynamic spawn throttle',
+            guard_mission='Mission & extract guard',
+            guard_patrol_gate='Patrol gate throttle',
+            guard_soft_pop='Population soft cap',
+            guard_fold='Options',
             console='EnemySpawnMultiplier', console_hint='by Natsun',
             spawn_section='01 / SPAWN PARAMETERS', assist_section='02 / ASSIST CONTROLS',
             composition_section='03 / REINFORCEMENT MIX',
@@ -69,7 +80,10 @@ return function()
             encounter_cd_desc='Target reinforcement interval in seconds. 30 uses vanilla pacing.',
             patrol_cd_desc='Approximate patrol interval in seconds, mapped to a rate curve. 30 uses vanilla pacing.',
             fast_corpse_desc='Speed up corpse decay while keeping ragdolls; disabling restores original values.',
-            dynamic_spawn_desc='',
+            dynamic_spawn_desc='Auto-throttles when the game is overloaded, reducing stutter and preventing crashes. Sub-options can be toggled individually.',
+            guard_mission_desc='Controls whether spawn rates rise on main-objective progress, inside the extract zone, or after extract is called.',
+            guard_patrol_gate_desc='Reduces patrol requests when approaching the patrol population gate.',
+            guard_soft_pop_desc='Temporarily lowers spawn pressure when director load is high.',
             preset_desc='Reinforcement template weights: heavy, light / medium, or vanilla.',
             language_desc='ESM language. F8 updates immediately; reopen the escape menu to refresh MODS text.',
         },
@@ -83,8 +97,9 @@ return function()
         return true
     end
 
-    M.CLIENT_W, M.CLIENT_H = 680, 640
+    M.CLIENT_W = 680
     M.HEADER_H = 72
+    M.guard_expanded = false
     M.SLIDER_MIN, M.SLIDER_MAX = 0.1, 6.0
     M.SLIDER_STEPS = 59 -- inclusive 0.1 grid across 0.1 .. 6.0
     M.PATROL_SIZE_MIN, M.PATROL_SIZE_MAX = 0.1, 2.0
@@ -103,8 +118,11 @@ return function()
     local DEFAULTS = {
         budget = 2.0, patrol_count = 1.0, patrol_size = 1.0,
         encounter_cd = M.COOLDOWN_FAST, patrol_cd = M.COOLDOWN_FAST, preset = 'heavy',
-        fast_corpse = true, dynamic_spawn = true, language = 'zh',
+        fast_corpse = true, dynamic_spawn = true,
+        guard_mission = true, guard_patrol_gate = true, guard_soft_pop = true,
+        language = 'zh',
     }
+    local GUARD_KEYS = {'guard_mission', 'guard_patrol_gate', 'guard_soft_pop'}
 
     local SLIDER_LABELS = {
         {key = 'budget'},
@@ -113,11 +131,6 @@ return function()
         {key = 'encounter_cd', kind = 'cooldown'},
         {key = 'patrol_cd', kind = 'cooldown'},
     }
-    -- Simple on/off rows rendered as checkboxes, below the sliders.
-    local CHECKBOX_LABELS = {
-        {key = 'fast_corpse'},
-        {key = 'dynamic_spawn'},
-    }
 
     local RADIO_LABELS = {
         {value = 'heavy'},
@@ -125,15 +138,29 @@ return function()
         {value = 'native'},
     }
 
+    function M.client_height()
+        return M.guard_expanded and 780 or 680
+    end
+    M.CLIENT_H = M.client_height()
+
     function M.reset()
         M.pending = {}
         for key, value in pairs(DEFAULTS) do M.pending[key] = value end
         M.pending.language = M.language
+        M.guard_expanded = false
+        M.CLIENT_H = M.client_height()
     end
     M.reset()
 
+    function M.toggle_guard_fold()
+        M.guard_expanded = not M.guard_expanded
+        M.CLIENT_H = M.client_height()
+        return M.guard_expanded
+    end
+
     -- Geometry is declared once so painting and hit testing can never disagree.
     function M.layout()
+        M.CLIENT_H = M.client_height()
         local sliders = {}
         for index, def in ipairs(SLIDER_LABELS) do
             sliders[index] = {
@@ -145,27 +172,38 @@ return function()
             item.track_x, item.track_w = item.x + 166, item.w - 166 - 84
             item.track_y = item.y + 18
         end
-        local checkboxes = {}
-        for index, def in ipairs(CHECKBOX_LABELS) do
-            checkboxes[index] = {key = def.key, label = M.text(def.key),
-                                 x = 32 + (index - 1) * 316, y = 372,
-                                 w = 300, h = 44}
+        local checkboxes = {
+            {key = 'fast_corpse', label = M.text('fast_corpse'), x = 32, y = 372, w = 616, h = 44},
+            {key = 'dynamic_spawn', label = M.text('dynamic_spawn'), x = 32, y = 424, w = 560, h = 40,
+             fold = true, tip = true},
+        }
+        local fold = {id = 'guard_fold', x = 600, y = 424, w = 48, h = 40}
+        local y = 472
+        if M.guard_expanded then
+            for _, key in ipairs(GUARD_KEYS) do
+                checkboxes[#checkboxes + 1] = {
+                    key = key, label = M.text(key), tip = true,
+                    x = 48, y = y, w = 600, h = 34,
+                }
+                y = y + 38
+            end
         end
-        M.PRESET_HEADER_Y = 428
+        M.PRESET_HEADER_Y = y + 8
         local radios = {}
         for index, def in ipairs(RADIO_LABELS) do
             radios[index] = {key = 'preset', value = def.value, label = M.text(def.value..'_short'),
-                             x = 32 + (index - 1) * 212, y = 456, w = 192, h = 46}
+                             x = 32 + (index - 1) * 212, y = M.PRESET_HEADER_Y + 28, w = 192, h = 46}
         end
-        local buttons_y = 524
+        local buttons_y = M.PRESET_HEADER_Y + 92
         M.BUTTONS_Y = buttons_y
+        M.FOOTER_Y = buttons_y + 52
         local buttons = {
             {id = 'apply', label = M.text('apply'), x = 32, y = buttons_y, w = 148, h = 40, accent = true},
             {id = 'reset', label = M.text('reset'), x = 192, y = buttons_y, w = 112, h = 40},
             {id = 'export', label = M.text('export'), x = 316, y = buttons_y, w = 180, h = 40},
             {id = 'language', label = M.text('language_button'), x = 508, y = buttons_y, w = 140, h = 40},
         }
-        return {sliders = sliders, checkboxes = checkboxes, radios = radios, buttons = buttons}
+        return {sliders = sliders, checkboxes = checkboxes, radios = radios, buttons = buttons, fold = fold}
     end
 
     function M.inside(x, y, item)
@@ -242,6 +280,9 @@ return function()
             patrol_cd_seconds = M.pending.patrol_cd,
             fast_corpse = M.pending.fast_corpse,
             dynamic_spawn = M.pending.dynamic_spawn,
+            guard_mission = M.pending.guard_mission,
+            guard_patrol_gate = M.pending.guard_patrol_gate,
+            guard_soft_pop = M.pending.guard_soft_pop,
             preset = M.pending.preset,
         }
     end
@@ -286,6 +327,9 @@ return function()
             M.pending.fast_corpse = patch.fast_corpse
         end
         M.pending.dynamic_spawn=patch.dynamic_spawn_enabled~=false
+        M.pending.guard_mission=patch.guard_mission~=false
+        M.pending.guard_patrol_gate=patch.guard_patrol_gate~=false
+        M.pending.guard_soft_pop=patch.guard_soft_pop~=false
         if not patch.template_bias_enabled then
             M.pending.preset = 'native'
         elseif patch.template_bias_light >= patch.template_bias_heavy then
@@ -338,6 +382,9 @@ return function()
             changed = true
         end
         if type(settings.dynamic_spawn)=='boolean' then M.pending.dynamic_spawn=settings.dynamic_spawn;changed=true end
+        for _, key in ipairs(GUARD_KEYS) do
+            if type(settings[key])=='boolean' then M.pending[key]=settings[key];changed=true end
+        end
         local preset = settings.preset
         if preset == 'heavy' or preset == 'light_medium' or preset == 'native' then
             M.pending.preset = preset
@@ -363,6 +410,7 @@ return function()
                 return 'slider', item
             end
         end
+        if widgets.fold and M.inside(x, y, widgets.fold) then return 'fold', widgets.fold end
         for _, item in ipairs(widgets.checkboxes or {}) do
             if M.inside(x, y, item) then return 'checkbox', item end
         end
@@ -374,6 +422,13 @@ return function()
         end
         if y >=0 and y < M.HEADER_H then return 'title' end
         return nil
+    end
+
+    function M.tooltip_for(kind, item)
+        if kind ~= 'checkbox' or not item or not item.tip then return nil end
+        local text = M.text(item.key .. '_desc')
+        if not text or text == '' or text == item.key .. '_desc' then return nil end
+        return text
     end
 
     return M

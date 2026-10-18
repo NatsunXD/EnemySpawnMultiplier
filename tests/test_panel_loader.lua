@@ -156,6 +156,7 @@ local gated_corpse = {
     update=function() decay_updates=decay_updates+1 end,
     set_enabled=function() end,
 }
+local create_privacy_gate = assert(loadfile(source .. '/privacy_gate.lua'))
 local function start_gate(create_sos)
     local isolated = setmetatable({print=function() end,
         os={getenv=function() return nil end},
@@ -163,8 +164,9 @@ local function start_gate(create_sos)
     isolated._G=isolated
     local gate_chunk=assert(loadfile(source .. '/archive_loader.lua'))
     setfenv(gate_chunk,isolated)
+    -- args: ... create_sos, create_dynamic, create_peer, create_privacy_gate
     gate_chunk()(factory,gated_patch,identity,nil,nil,nil,nil,nil,nil,
-        function() return gated_corpse end,nil,nil,create_sos)
+        function() return gated_corpse end,nil,nil,create_sos,nil,nil,create_privacy_gate)
     return isolated
 end
 local thrown=start_gate(function() return {create=function() return {
@@ -199,7 +201,7 @@ for _=1,50 do latched.update(0.1) end
 assert(scans==1 and writes==0 and decay_updates==0 and session.sticky)
 live=false; latched.update(0.1)
 assert(not session.sticky and writes==1 and decay_updates==1)
-pass('SOS latch blocks both writers until return to ship')
+pass('SOS latch blocks both writers until mission return clears contamination')
 -- Appended controller factory receives exact-build identity and elapsed time.
 local create_dynamic=assert(loadfile(source..'/dynamic_spawn.lua'))()
 local attached,known,elapsed_dt,resets,pressure_flag

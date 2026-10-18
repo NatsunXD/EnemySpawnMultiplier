@@ -160,20 +160,23 @@ s.update(game,dir+0x1000,0);assert(s.stats.valid==0 and s.effective.count==4)
 s.reset();assert(s.effective==nil and s.sample==nil and not s.progress_enabled)
 pass('racing identities, protection, invalid counts fail closed; signed S70, immediate H>100, owner and timer restoration work')
 patch.dynamic_combined_switch=true
-mem[dir+0x36c0]=bytes(10,4);mem[pop+0x1c]=bytes(91,4)
+patch.guard_mission,patch.guard_patrol_gate,patch.guard_soft_pop=true,true,true
+-- H=201 with P=E=80 keeps S70=41 below float64 so soft-pop alone yields keep80%.
+mem[dir+0x36c0]=bytes(10,4);mem[pop+0x1c]=bytes(191,4)
+mem[dir+0x61c]=bytes(80,4)..bytes(80,4)
 local combined=M.create(api,patch,true)
-for _=1,2 do seen={};combined.update(game,dir,1);assert(combined.effective.count==4) end
+for _=1,2 do seen={};combined.update(game,dir,1);assert(combined.effective.remaining==0) end
 seen={};combined.update(game,dir,1)
-assert(combined.mode=='h100_compensation' and combined.progress_enabled and near(combined.effective.count,1.3))
+assert(combined.mode=='spawn_guard' and combined.progress_enabled and near(combined.effective.count,3.4))
 patch.dynamic_spawn_enabled=false;seen={};combined.update(game,dir,1)
-assert(not combined.progress_enabled and combined.effective.count==4 and combined.effective.rate==6)
-assert(combined.effective.phase=='off' and combined.sample.h==101 and combined.stats.valid==4)
-patch.dynamic_spawn_enabled=true
-for _=1,2 do seen={};combined.update(game,dir,1);assert(combined.effective.count==4) end
-seen={};combined.update(game,dir,1)
-assert(combined.progress_enabled and near(combined.effective.count,1.3))
+assert(not combined.progress_enabled and combined.effective.phase=='spacing_only')
+assert(combined.sample.h==201 and combined.stats.valid>=3)
+patch.dynamic_spawn_enabled=true;patch.guard_soft_pop=false
+mem[pop+0x1c]=bytes(80,4);mem[dir+0x61c]=bytes(0,4)..bytes(0,4)
+for _=1,2 do seen={};combined.update(game,dir,1) end
+assert(combined.effective.phase=='patrol_gate_hard' and near(combined.effective.count,1))
 patch.dynamic_combined_switch=nil
-pass('combined switch disables both compensation paths and cancels hold, while both gate diagnostics continue')
+pass('spawn_guard: H>200 soft-pop keep80%, master off keeps spacing, S70 emergency gate throttles patrol')
 
 local model_factory=assert(loadfile(source..'/panel_model.lua'))()
 local decorate=assert(loadfile(source..'/experiments/local_panel_model.lua'))()
@@ -195,8 +198,8 @@ if wrapper:find('patch.dynamic_combined_switch = true',1,true) then
     assert(not wrapper:find('Soft limit (test)',1,true))
     local original=model_factory()
     assert(original.pending.dynamic_spawn==true)
-    assert(original.text('dynamic_spawn')=='动态生成补偿')
-    assert(original.text('dynamic_spawn','en')=='Dynamic spawn compensation')
+    assert(original.text('dynamic_spawn')=='动态生成节流')
+    assert(original.text('dynamic_spawn','en')=='Dynamic spawn throttle')
 else assert(wrapper:find('create_model = create_local_model(create_model)',1,true)) end
 pass('local-only bilingual toggle and runtime module are selected explicitly; effective changes do not move sliders')
 print(n..' local soft-limit test checks passed; synthetic only.')

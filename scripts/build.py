@@ -172,10 +172,12 @@ VARIANTS['local-soft-limit-test'] = dict(
     description='Local test by Natsun. F8 settings; optional H100 soft limit. Requires Bingus Shared Loader v15+.',
 )
 VARIANTS['dynamic-compensation'] = dict(
-    VARIANTS['local-soft-limit-test'], revision='data-v24-h100-3samples-quantity10pct-20s',
+    VARIANTS['local-soft-limit-test'], revision='data-v24-spawn-guard-privacy-solo',
     name='Enemy Spawn Multiplier', combined_compensation=True,
-    release_suffix='H100-3Samples-10Pct-20s',
-    description='By Natsun. F8 settings with dynamic spawn compensation. Requires Bingus Shared Loader v15+.',
+    release_suffix='SpawnGuard-PrivacySolo',
+    description=(
+        'By Natsun. Spawn guard + privacy latch (Public 6s/SOS; solo OK). '
+        'Requires Bingus Shared Loader v15+.'),
 )
 
 
@@ -265,6 +267,8 @@ def main():
     tests += '\n' + run([LUA, TESTS / 'test_blackbox.lua', SOURCE], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_performance_budget.lua', SOURCE, build, sha(LUA.read_bytes())], env=env)
     tests += '\n' + run([LUA, TESTS / 'test_sos_probe.lua', SOURCE], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_peer_probe.lua', SOURCE], env=env)
+    tests += '\n' + run([LUA, TESTS / 'test_privacy_gate.lua', SOURCE], env=env)
     if variant.get('panel', False):
         tests += '\n' + run([LUA, TESTS / 'test_corpse_clear.lua', SOURCE, build], env=env)
     if os.name == 'nt':
@@ -448,15 +452,20 @@ def main():
         report['source_sha256'].update({path.relative_to(ROOT).as_posix(): sha(path.read_bytes())
             for path in (SOURCE / 'experiments').glob('*.lua')})
         if variant.get('combined_compensation'):
-            report['data_change']['dynamic_spawn'].update(mode='h100_compensation',
-                threshold_gt=100, confirmation_samples=3, immediate_trigger_enabled=False,
+            report['data_change']['dynamic_spawn'].update(mode='spawn_guard',
+                threshold_gt=200, confirmation_samples=3, immediate_trigger_enabled=False,
                 hold_seconds=0, recovery_seconds=20, duration_seconds=20,
                 rate_hold_seconds=6, rate_recovery_seconds=4, rate_duration_seconds=10,
                 retrigger='same_threshold_refreshes_quantity_20s_and_rate_10s',
-                patrol_count_bonus_retained=0.1, patrol_size_bonus_retained=0.1,
-                patrol_rate_factor=0.75, sub_one_quantities='unchanged',
+                patrol_count_bonus_retained=0.80, patrol_size_bonus_retained=0.80,
+                patrol_rate_factor=0.92, sub_one_quantities='unchanged',
                 recovery_interpolation='linear_to_latest_applied_user_settings',
-                progression='all_13_blocks_exact_1', switch='soft_limit_and_progression_and_extraction',
+                s70_control_enabled=True, s70_soft=64, s70_float_hi=74, s70_hard=78, s70_release=68,
+                s70_confirm_samples=2, s70_float_count_min=0.50, s70_float_size_min=0.32,
+                s70_soft_rate=0.82,
+                request_spacing_seconds=0.5, request_spacing_always_on=True,
+                progression='all_13_blocks_exact_1',
+                switch='spawn_guard_mission_gate_soft_spacing',
                 progression_floats=65, progression_zero_policy='set_to_1',
                 extraction_bonus_factor=0.5, extraction_bonus_rule='v>1 ? 1+(v-1)*0.5 : v',
                 extraction_available_offsets=[hex(0x128+60*i+36) for i in range(13)],
